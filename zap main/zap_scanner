@@ -1,0 +1,6 @@
+import requests
+import time
+import sys
+
+ZAP_API = 'http://localhost:8080'
+API_KEY = 'j9u08qi9sjf2b759acqeg79vq7'  # Set if ZAP requires an API key
