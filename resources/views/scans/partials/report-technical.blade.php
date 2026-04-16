@@ -74,10 +74,8 @@
     </div>
     <div class="px-6 py-5 text-sm space-y-3">
         <p class="rounded-md bg-indigo-50 border border-indigo-100 px-3 py-2 text-indigo-900">{{ __('Gemini only explains, summarizes, and prioritizes findings. Scanning is done by ZAP and Nikto.') }}</p>
-        @if (is_array($aiDecoded))
-            <pre class="overflow-x-auto rounded bg-gray-900 p-4 text-xs text-gray-100">{{ json_encode($aiDecoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
-        @elseif ($scan->ai_summary)
-            <pre class="overflow-x-auto rounded bg-gray-900 p-4 text-xs text-gray-100">{{ $scan->ai_summary }}</pre>
+        @if (! empty($aiSummaryText))
+            <p class="rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-gray-700 whitespace-pre-wrap">{{ $aiSummaryText }}</p>
         @else
             <p class="text-gray-500">{{ __('No AI summary yet.') }}</p>
         @endif

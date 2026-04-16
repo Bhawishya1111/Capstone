@@ -144,9 +144,11 @@
                                 <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Target') }}</th>
                                 <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Status') }}</th>
                                 <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Scanner steps') }}</th>
+                                <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Findings') }}</th>
                                 <th class="px-6 py-3 text-left font-medium text-gray-600 w-48">{{ __('Progress') }}</th>
                                 <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Phase') }}</th>
                                 <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Started') }}</th>
+                                <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Duration') }}</th>
                                 <th class="px-6 py-3 text-right font-medium text-gray-600">{{ __('') }}</th>
                             </tr>
                         </thead>
@@ -208,6 +210,12 @@
                                         </div>
                                     </td>
                                     <td class="px-6 py-3">
+                                        <div class="text-xs text-gray-700 space-y-0.5">
+                                            <p class="font-medium text-gray-900">{{ (int) $scan->findings_count }} {{ __('total') }}</p>
+                                            <p>ZAP: {{ (int) $scan->zap_findings_count }} · Nikto: {{ (int) $scan->nikto_findings_count }}</p>
+                                        </div>
+                                    </td>
+                                    <td class="px-6 py-3">
                                         <div class="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                                             <div
                                                 data-scan-progress-bar
@@ -218,7 +226,14 @@
                                         <span class="mt-1 inline-block text-xs text-gray-500">{{ (int) $scan->progress }}%</span>
                                     </td>
                                     <td class="px-6 py-3 text-gray-700" data-scan-phase>{{ $scan->phase }}</td>
-                                    <td class="px-6 py-3 text-gray-600 whitespace-nowrap">{{ $scan->created_at->format('Y-m-d H:i') }}</td>
+                                    <td class="px-6 py-3 text-gray-600 whitespace-nowrap" title="{{ $scan->created_at->format('Y-m-d H:i:s') }}">{{ $scan->created_at->diffForHumans() }}</td>
+                                    <td class="px-6 py-3 text-gray-600 whitespace-nowrap">
+                                        @if ($scan->completed_at)
+                                            {{ $scan->created_at->diffAsCarbonInterval($scan->completed_at)->cascade()->forHumans(['short' => true]) }}
+                                        @else
+                                            —
+                                        @endif
+                                    </td>
                                     <td class="px-6 py-3 text-right whitespace-nowrap">
                                         <div class="inline-flex items-center gap-2">
                                         <a href="{{ route('scans.report', $scan) }}" class="inline-flex rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-indigo-700 hover:bg-indigo-100 font-medium">
@@ -236,7 +251,7 @@
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="7" class="px-6 py-8 text-center text-gray-500">
+                                    <td colspan="9" class="px-6 py-8 text-center text-gray-500">
                                         {{ __('No scans yet.') }}
                                     </td>
                                 </tr>

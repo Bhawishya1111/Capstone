@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ScanController;
+use App\Http\Controllers\UserManagementController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -12,6 +13,8 @@ Route::get('/', function () {
 
 Route::middleware(['auth'])->group(function () {
     Route::get('/dashboard', [ScanController::class, 'dashboard'])->name('dashboard');
+    Route::get('/users', [UserManagementController::class, 'index'])->name('users.index');
+    Route::patch('/users/{user}/role', [UserManagementController::class, 'updateRole'])->name('users.update-role');
 
     Route::post('/scans', [ScanController::class, 'startScan'])->name('scans.start');
     Route::delete('/scans', [ScanController::class, 'destroyAll'])->name('scans.destroy-all');

@@ -56,6 +56,11 @@ class ScanController extends Controller
         $scans = Scan::query()
             ->visibleToUser($user)
             ->with('website')
+            ->withCount('findings')
+            ->withCount([
+                'findings as zap_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_ZAP),
+                'findings as nikto_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_NIKTO),
+            ])
             ->orderByDesc('created_at')
             ->limit(50)
             ->get();
@@ -245,10 +250,17 @@ class ScanController extends Controller
         }
 
         $aiDecoded = null;
+        $aiSummaryText = null;
         if (is_string($scan->ai_summary) && $scan->ai_summary !== '') {
             $aiDecoded = json_decode($scan->ai_summary, true);
             if (json_last_error() !== JSON_ERROR_NONE) {
                 $aiDecoded = null;
+                $aiSummaryText = trim($scan->ai_summary);
+            } elseif (is_array($aiDecoded)) {
+                $exec = data_get($aiDecoded, 'executive_summary');
+                if (is_string($exec) && trim($exec) !== '') {
+                    $aiSummaryText = trim($exec);
+                }
             }
         }
 
@@ -270,6 +282,7 @@ class ScanController extends Controller
         return view('scans.report', [
             'scan' => $scan,
             'aiDecoded' => $aiDecoded,
+            'aiSummaryText' => $aiSummaryText,
             'rawAvailable' => $rawAvailable,
             'viewMode' => $viewMode,
             'trendSeries' => $trendSeries,

@@ -18,6 +18,8 @@ class User extends Authenticatable
 {
     public const ROLE_ADMIN = 'admin';
 
+    public const ROLE_ANALYST = 'analyst';
+
     public const ROLE_USER = 'user';
 
     /** @use HasFactory<UserFactory> */
@@ -39,6 +41,20 @@ class User extends Authenticatable
     public function isAdmin(): bool
     {
         return $this->role === self::ROLE_ADMIN;
+    }
+
+    /**
+     * Roles shown in management UI.
+     *
+     * @return array<int, string>
+     */
+    public static function allowedRoles(): array
+    {
+        return [
+            self::ROLE_ADMIN,
+            self::ROLE_ANALYST,
+            self::ROLE_USER,
+        ];
     }
 
     public function scans(): HasMany

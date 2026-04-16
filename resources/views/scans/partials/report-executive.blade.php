@@ -22,23 +22,10 @@
             <div class="rounded-lg border border-gray-200 bg-gray-50 p-4"><p class="text-xs uppercase tracking-wide text-gray-900">{{ __('Info') }}</p><p class="mt-1 text-2xl font-semibold text-gray-900">{{ $bySeverity['info'] ?? 0 }}</p></div>
         </div>
 
-        @if (is_array($aiDecoded) && ! empty($aiDecoded['executive_summary']))
+        @if (! empty($aiSummaryText))
             <div>
                 <h4 class="font-semibold text-gray-900">{{ __('AI executive narrative') }}</h4>
-                <p class="mt-2 rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-gray-700 whitespace-pre-wrap">{{ $aiDecoded['executive_summary'] }}</p>
-            </div>
-        @endif
-
-        @if (is_array($aiDecoded) && ! empty($aiDecoded['recommended_next_steps']))
-            <div>
-                <h4 class="font-semibold text-gray-900">{{ __('Recommended next steps') }}</h4>
-                @if (is_array($aiDecoded['recommended_next_steps']))
-                    <ol class="mt-2 list-decimal list-inside text-gray-700 space-y-1">
-                        @foreach ($aiDecoded['recommended_next_steps'] as $step)
-                            <li>{{ is_scalar($step) ? $step : json_encode($step) }}</li>
-                        @endforeach
-                    </ol>
-                @endif
+                <p class="mt-2 rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-gray-700 whitespace-pre-wrap">{{ $aiSummaryText }}</p>
             </div>
         @endif
     </div>

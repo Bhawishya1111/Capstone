@@ -491,10 +491,12 @@ class RunWaveScanJob implements ShouldQueue
             'nikto_findings' => $niktoFindings,
         ];
 
-        $prompt = "You are a security analyst assistant.\n".
-            "Summarize and prioritize findings from ZAP and Nikto.\n".
-            "Do not invent scanner findings. Use only provided input.\n".
-            "Return valid JSON ONLY with keys: executive_summary, severity_overview, findings, nikto_findings, remediation_priority, recommended_next_steps, technical_summary.\n".
+        $prompt = "You are a security analyst assistant writing for non-technical readers.\n".
+            "Write exactly one plain-language paragraph (90-130 words, Grade 8 readability) summarizing the combined ZAP and Nikto findings.\n".
+            "Avoid heavy security jargon. If a technical term is necessary, explain it in simple words.\n".
+            "Cover: overall risk level, the main weaknesses, and the single most important fix to do first.\n".
+            "Do not invent findings. Use only provided input.\n".
+            "Return plain text paragraph only (no JSON, no bullets, no markdown, no headings).\n".
             "Input JSON:\n".json_encode($input, JSON_UNESCAPED_SLASHES);
 
         try {
@@ -510,7 +512,7 @@ class RunWaveScanJob implements ShouldQueue
                 ]],
                 'generationConfig' => [
                     'temperature' => 0.2,
-                    'responseMimeType' => 'application/json',
+                    'responseMimeType' => 'text/plain',
                 ],
             ]);
 
@@ -529,12 +531,12 @@ class RunWaveScanJob implements ShouldQueue
                 return null;
             }
 
-            $decoded = json_decode($text, true);
-            if (! is_array($decoded)) {
+            $paragraph = trim($text);
+            if ($paragraph === '') {
                 return null;
             }
 
-            return json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            return $paragraph;
         } catch (\Throwable $e) {
             Log::warning('WAVe-Lite: Gemini summary request exception', [
                 'scan_id' => $scan->id,
@@ -561,45 +563,14 @@ class RunWaveScanJob implements ShouldQueue
             ->where('source', ScanFinding::SOURCE_NIKTO)
             ->count();
 
-        $payload = [
-            'executive_summary' => 'Automated ZAP baseline finished. '.$scan->findings_count.' normalized finding row(s) were recorded ('.$niktoCount.' from Nikto). This block is a heuristic summary, not Gemini output.',
-            'severity_overview' => $bySeverity,
-            'findings' => ScanFinding::query()
-                ->where('scan_id', $scan->id)
-                ->where('source', ScanFinding::SOURCE_ZAP)
-                ->orderByDesc('id')
-                ->limit(12)
-                ->get(['title', 'severity', 'endpoint'])
-                ->map(fn ($f) => [
-                    'title' => $f->title,
-                    'severity' => $f->severity,
-                    'endpoint' => $f->endpoint,
-                    'source' => ScanFinding::SOURCE_ZAP,
-                ])
-                ->all(),
-            'nikto_findings' => ScanFinding::query()
-                ->where('scan_id', $scan->id)
-                ->where('source', ScanFinding::SOURCE_NIKTO)
-                ->orderByDesc('id')
-                ->limit(12)
-                ->get(['title', 'severity', 'endpoint'])
-                ->map(fn ($f) => [
-                    'title' => $f->title,
-                    'severity' => $f->severity,
-                    'endpoint' => $f->endpoint,
-                    'source' => ScanFinding::SOURCE_NIKTO,
-                ])
-                ->all(),
-            'remediation_priority' => 'Triage by severity, confirm each issue manually, then apply fixes starting with High and Medium risks.',
-            'recommended_next_steps' => [
-                'Verify every reported URL and parameter.',
-                'Re-run the scan after fixes.',
-                'Consider a full ZAP GUI session for authenticated areas.',
-            ],
-            'technical_summary' => 'Raw ZAP JSON and Nikto text (if run) are available under Raw outputs.',
-        ];
+        $high = (int) ($bySeverity['High'] ?? 0);
+        $medium = (int) ($bySeverity['Medium'] ?? 0);
+        $low = (int) ($bySeverity['Low'] ?? 0);
+        $info = (int) ($bySeverity['Informational'] ?? 0);
 
-        return json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        return 'Automated scan finished with '.$scan->findings_count.' total findings, including '.$niktoCount.' from Nikto. '.
+            'The biggest risk comes from '.$high.' high-risk and '.$medium.' medium-risk issues, while '.$low.' low-risk and '.$info.' informational items are lower priority. '.
+            'Start by fixing the high-risk and medium-risk issues first, then run the scan again to make sure the fixes worked.';
     }
 
     private function runNiktoIfConfigured(Scan $scan, string $prefix): void

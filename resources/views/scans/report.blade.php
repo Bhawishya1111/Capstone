@@ -2,6 +2,7 @@
 @php
     $zapFindings = $scan->findings->where('source', \App\Models\ScanFinding::SOURCE_ZAP);
     $niktoFindings = $scan->findings->where('source', \App\Models\ScanFinding::SOURCE_NIKTO);
+    $totalFindings = $scan->findings->count();
 @endphp
 
 <x-app-layout>
@@ -49,6 +50,31 @@
                         </div>
                     @endif
                 </dl>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-4">
+                <div class="rounded-lg border border-gray-200 bg-white p-4">
+                    <p class="text-xs uppercase tracking-wide text-gray-500">{{ __('Total findings') }}</p>
+                    <p class="mt-1 text-2xl font-semibold text-gray-900">{{ $totalFindings }}</p>
+                </div>
+                <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+                    <p class="text-xs uppercase tracking-wide text-indigo-700">{{ __('ZAP findings') }}</p>
+                    <p class="mt-1 text-2xl font-semibold text-indigo-900">{{ $zapFindings->count() }}</p>
+                </div>
+                <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                    <p class="text-xs uppercase tracking-wide text-amber-700">{{ __('Nikto findings') }}</p>
+                    <p class="mt-1 text-2xl font-semibold text-amber-900">{{ $niktoFindings->count() }}</p>
+                </div>
+                <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                    <p class="text-xs uppercase tracking-wide text-emerald-700">{{ __('Scan duration') }}</p>
+                    <p class="mt-1 text-xl font-semibold text-emerald-900">
+                        @if ($scan->completed_at)
+                            {{ $scan->created_at->diffAsCarbonInterval($scan->completed_at)->cascade()->forHumans(['short' => true]) }}
+                        @else
+                            —
+                        @endif
+                    </p>
+                </div>
             </div>
 
             <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
@@ -118,9 +144,9 @@
             </div>
 
             @if ($viewMode === 'executive')
-                @include('scans.partials.report-executive', ['scan' => $scan, 'aiDecoded' => $aiDecoded])
+                @include('scans.partials.report-executive', ['scan' => $scan, 'aiDecoded' => $aiDecoded, 'aiSummaryText' => $aiSummaryText])
             @else
-                @include('scans.partials.report-technical', ['scan' => $scan, 'zapFindings' => $zapFindings, 'niktoFindings' => $niktoFindings, 'aiDecoded' => $aiDecoded])
+                @include('scans.partials.report-technical', ['scan' => $scan, 'zapFindings' => $zapFindings, 'niktoFindings' => $niktoFindings, 'aiDecoded' => $aiDecoded, 'aiSummaryText' => $aiSummaryText])
             @endif
         </div>
     </div>
