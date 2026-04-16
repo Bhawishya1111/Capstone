@@ -1,0 +1,19 @@
+[
+   {
+      "end_time" : "2026-04-16 10:58:23 +1000",
+      "host" : "testphp.vulnweb.com",
+      "ip" : "44.228.249.3",
+      "port" : "80",
+      "server_banner" : null,
+      "start_time" : "2026-04-16 10:58:23 +1000",
+      "vulnerabilities" : [
+         {
+            "id" : "FAIL",
+            "method" : "GET",
+            "msg" : "Unable to connect to testphp.vulnweb.com:80.",
+            "references" : "",
+            "url" : "/"
+         }
+      ]
+   }
+]
