@@ -43,6 +43,16 @@ class User extends Authenticatable
         return $this->role === self::ROLE_ADMIN;
     }
 
+    public function isAnalyst(): bool
+    {
+        return $this->role === self::ROLE_ANALYST;
+    }
+
+    public function canViewTechnicalReports(): bool
+    {
+        return $this->isAdmin() || $this->isAnalyst();
+    }
+
     /**
      * Roles shown in management UI.
      *

@@ -81,4 +81,55 @@ function initScanPolling() {
     });
 }
 
-document.addEventListener('DOMContentLoaded', initScanPolling);
+function initRiskChart() {
+    const pie = document.querySelector('[data-risk-pie]');
+    const bars = document.querySelector('[data-risk-bars]');
+    const hover = document.querySelector('[data-risk-hover]');
+    const toggles = document.querySelectorAll('[data-risk-toggle]');
+    const items = document.querySelectorAll('[data-risk-item]');
+
+    if (!pie || !bars || !hover || toggles.length === 0 || items.length === 0) {
+        return;
+    }
+
+    const setMode = (mode) => {
+        const pieMode = mode === 'pie';
+        pie.classList.toggle('hidden', !pieMode);
+        bars.classList.toggle('hidden', pieMode);
+
+        toggles.forEach((btn) => {
+            const selected = btn.getAttribute('data-risk-toggle') === mode;
+            btn.classList.toggle('bg-white', selected);
+            btn.classList.toggle('shadow-sm', selected);
+            btn.classList.toggle('text-gray-800', selected);
+            btn.classList.toggle('text-gray-600', !selected);
+        });
+    };
+
+    const renderHoverText = (item) => {
+        const label = item.getAttribute('data-risk-label') ?? 'Unknown';
+        const count = Number(item.getAttribute('data-risk-count') ?? 0);
+        const total = Math.max(1, Number(item.getAttribute('data-risk-total') ?? 1));
+        const pct = ((count / total) * 100).toFixed(1);
+        hover.textContent = `${label}: ${count} finding(s), ${pct}% of total.`;
+    };
+
+    items.forEach((item) => {
+        item.addEventListener('mouseenter', () => renderHoverText(item));
+        item.addEventListener('focus', () => renderHoverText(item));
+        item.addEventListener('click', () => renderHoverText(item));
+    });
+
+    toggles.forEach((btn) => {
+        btn.addEventListener('click', () => {
+            setMode(btn.getAttribute('data-risk-toggle') ?? 'pie');
+        });
+    });
+
+    setMode('pie');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initScanPolling();
+    initRiskChart();
+});

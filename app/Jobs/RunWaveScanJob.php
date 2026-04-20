@@ -492,7 +492,7 @@ class RunWaveScanJob implements ShouldQueue
         ];
 
         $prompt = "You are a security analyst assistant writing for non-technical readers.\n".
-            "Write exactly one plain-language paragraph (90-130 words, Grade 8 readability) summarizing the combined ZAP and Nikto findings.\n".
+            "Write exactly one plain-language paragraph (500-1000 words, simple readability) summarizing the combined ZAP and Nikto findings.\n".
             "Avoid heavy security jargon. If a technical term is necessary, explain it in simple words.\n".
             "Cover: overall risk level, the main weaknesses, and the single most important fix to do first.\n".
             "Do not invent findings. Use only provided input.\n".

@@ -77,73 +77,79 @@
                 </div>
             </div>
 
-            <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div class="border-b border-gray-200 bg-gray-50 px-6 py-4">
-                    <h3 class="text-lg font-medium text-gray-900">{{ __('Raw outputs') }}</h3>
+            @if ($canViewTechnical)
+                <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-200 bg-gray-50 px-6 py-4">
+                        <h3 class="text-lg font-medium text-gray-900">{{ __('Raw outputs') }}</h3>
+                    </div>
+                    <ul class="divide-y divide-gray-100 px-6 py-4 text-sm">
+                        <li class="flex justify-between py-2"><span>{{ __('ZAP') }}</span>@if ($rawAvailable['zap'])<a href="{{ route('scans.downloads.raw', [$scan, 'zap']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
+                        <li class="flex justify-between py-2"><span>{{ __('Nikto') }}</span>@if ($rawAvailable['nikto'])<a href="{{ route('scans.downloads.raw', [$scan, 'nikto']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
+                        <li class="flex justify-between py-2"><span>{{ __('Combined') }}</span>@if ($rawAvailable['combined'])<a href="{{ route('scans.downloads.raw', [$scan, 'combined']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
+                    </ul>
                 </div>
-                <ul class="divide-y divide-gray-100 px-6 py-4 text-sm">
-                    <li class="flex justify-between py-2"><span>{{ __('ZAP') }}</span>@if ($rawAvailable['zap'])<a href="{{ route('scans.downloads.raw', [$scan, 'zap']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
-                    <li class="flex justify-between py-2"><span>{{ __('Nikto') }}</span>@if ($rawAvailable['nikto'])<a href="{{ route('scans.downloads.raw', [$scan, 'nikto']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
-                    <li class="flex justify-between py-2"><span>{{ __('Combined') }}</span>@if ($rawAvailable['combined'])<a href="{{ route('scans.downloads.raw', [$scan, 'combined']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
-                </ul>
-            </div>
+            @endif
 
-            <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div class="border-b border-gray-200 bg-gray-50 px-6 py-4">
-                    <h3 class="text-lg font-medium text-gray-900">{{ __('Report view') }}</h3>
+            @if ($canViewTechnical)
+                <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-200 bg-gray-50 px-6 py-4">
+                        <h3 class="text-lg font-medium text-gray-900">{{ __('Report view') }}</h3>
+                    </div>
+                    <div class="px-6 py-4 flex gap-3 text-sm">
+                        <a href="{{ route('scans.report', ['scan' => $scan->id, 'view' => 'technical', 'compare_scan_id' => request('compare_scan_id')]) }}" class="rounded-md px-3 py-1.5 {{ $viewMode === 'technical' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800' }}">{{ __('Technical') }}</a>
+                        <a href="{{ route('scans.report', ['scan' => $scan->id, 'view' => 'executive', 'compare_scan_id' => request('compare_scan_id')]) }}" class="rounded-md px-3 py-1.5 {{ $viewMode === 'executive' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800' }}">{{ __('Executive') }}</a>
+                    </div>
                 </div>
-                <div class="px-6 py-4 flex gap-3 text-sm">
-                    <a href="{{ route('scans.report', ['scan' => $scan->id, 'view' => 'technical', 'compare_scan_id' => request('compare_scan_id')]) }}" class="rounded-md px-3 py-1.5 {{ $viewMode === 'technical' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800' }}">{{ __('Technical') }}</a>
-                    <a href="{{ route('scans.report', ['scan' => $scan->id, 'view' => 'executive', 'compare_scan_id' => request('compare_scan_id')]) }}" class="rounded-md px-3 py-1.5 {{ $viewMode === 'executive' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800' }}">{{ __('Executive') }}</a>
-                </div>
-            </div>
+            @endif
 
-            <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div class="border-b border-gray-200 bg-gray-50 px-6 py-4">
-                    <h3 class="text-lg font-medium text-gray-900">{{ __('Trend and comparison') }}</h3>
-                </div>
-                <div class="px-6 py-5 space-y-6 text-sm">
-                    <div>
-                        <h4 class="font-semibold text-gray-900">{{ __('Recent trend (same website)') }}</h4>
-                        @if (empty($trendSeries))
-                            <p class="mt-2 text-gray-500">{{ __('Not enough completed scans for trend analysis yet.') }}</p>
-                        @else
-                            <div class="mt-2 overflow-x-auto">
-                                <table class="min-w-full text-left text-xs">
-                                    <thead class="text-gray-500"><tr><th class="py-2 pr-4">#</th><th class="py-2 pr-4">{{ __('Completed') }}</th><th class="py-2 pr-4">{{ __('Status') }}</th><th class="py-2 pr-4">{{ __('Total') }}</th><th class="py-2 pr-4">{{ __('Critical') }}</th><th class="py-2 pr-4">{{ __('High') }}</th><th class="py-2 pr-4">{{ __('Medium') }}</th><th class="py-2 pr-4">{{ __('Low') }}</th><th class="py-2 pr-4">{{ __('Info') }}</th></tr></thead>
-                                    <tbody class="divide-y divide-gray-100 text-gray-800">
-                                    @foreach ($trendSeries as $row)
-                                        <tr><td class="py-2 pr-4">{{ $row['scan_id'] }}</td><td class="py-2 pr-4">{{ $row['completed_at'] ?? '—' }}</td><td class="py-2 pr-4">{{ $row['status'] }}</td><td class="py-2 pr-4">{{ $row['total_findings'] }}</td><td class="py-2 pr-4">{{ $row['critical'] }}</td><td class="py-2 pr-4">{{ $row['high'] }}</td><td class="py-2 pr-4">{{ $row['medium'] }}</td><td class="py-2 pr-4">{{ $row['low'] }}</td><td class="py-2 pr-4">{{ $row['info'] }}</td></tr>
+            @if ($canViewTechnical)
+                <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-200 bg-gray-50 px-6 py-4">
+                        <h3 class="text-lg font-medium text-gray-900">{{ __('Trend and comparison') }}</h3>
+                    </div>
+                    <div class="px-6 py-5 space-y-6 text-sm">
+                        <div>
+                            <h4 class="font-semibold text-gray-900">{{ __('Recent trend (same website)') }}</h4>
+                            @if (empty($trendSeries))
+                                <p class="mt-2 text-gray-500">{{ __('Not enough completed scans for trend analysis yet.') }}</p>
+                            @else
+                                <div class="mt-2 overflow-x-auto">
+                                    <table class="min-w-full text-left text-xs">
+                                        <thead class="text-gray-500"><tr><th class="py-2 pr-4">#</th><th class="py-2 pr-4">{{ __('Completed') }}</th><th class="py-2 pr-4">{{ __('Status') }}</th><th class="py-2 pr-4">{{ __('Total') }}</th><th class="py-2 pr-4">{{ __('Critical') }}</th><th class="py-2 pr-4">{{ __('High') }}</th><th class="py-2 pr-4">{{ __('Medium') }}</th><th class="py-2 pr-4">{{ __('Low') }}</th><th class="py-2 pr-4">{{ __('Info') }}</th></tr></thead>
+                                        <tbody class="divide-y divide-gray-100 text-gray-800">
+                                        @foreach ($trendSeries as $row)
+                                            <tr><td class="py-2 pr-4">{{ $row['scan_id'] }}</td><td class="py-2 pr-4">{{ $row['completed_at'] ?? '—' }}</td><td class="py-2 pr-4">{{ $row['status'] }}</td><td class="py-2 pr-4">{{ $row['total_findings'] }}</td><td class="py-2 pr-4">{{ $row['critical'] }}</td><td class="py-2 pr-4">{{ $row['high'] }}</td><td class="py-2 pr-4">{{ $row['medium'] }}</td><td class="py-2 pr-4">{{ $row['low'] }}</td><td class="py-2 pr-4">{{ $row['info'] }}</td></tr>
+                                        @endforeach
+                                        </tbody>
+                                    </table>
+                                </div>
+                            @endif
+                        </div>
+                        <div>
+                            <h4 class="font-semibold text-gray-900">{{ __('Compare with previous scan') }}</h4>
+                            <form method="GET" action="{{ route('scans.report', $scan) }}" class="mt-2 flex gap-2">
+                                <input type="hidden" name="view" value="{{ $viewMode }}">
+                                <select name="compare_scan_id" class="rounded-md border-gray-300 text-sm">
+                                    <option value="">{{ __('Select scan') }}</option>
+                                    @foreach ($comparableScans as $s)
+                                        <option value="{{ $s->id }}" @selected($compareScan && $compareScan->id === $s->id)>#{{ $s->id }} - {{ $s->completed_at?->format('Y-m-d H:i') ?? '—' }}</option>
                                     @endforeach
-                                    </tbody>
-                                </table>
-                            </div>
-                        @endif
-                    </div>
-                    <div>
-                        <h4 class="font-semibold text-gray-900">{{ __('Compare with previous scan') }}</h4>
-                        <form method="GET" action="{{ route('scans.report', $scan) }}" class="mt-2 flex gap-2">
-                            <input type="hidden" name="view" value="{{ $viewMode }}">
-                            <select name="compare_scan_id" class="rounded-md border-gray-300 text-sm">
-                                <option value="">{{ __('Select scan') }}</option>
-                                @foreach ($comparableScans as $s)
-                                    <option value="{{ $s->id }}" @selected($compareScan && $compareScan->id === $s->id)>#{{ $s->id }} - {{ $s->completed_at?->format('Y-m-d H:i') ?? '—' }}</option>
-                                @endforeach
-                            </select>
-                            <button class="rounded-md bg-indigo-600 px-3 py-1.5 text-white">{{ __('Compare') }}</button>
-                        </form>
-                        @if ($comparison)
-                            <div class="mt-3 grid gap-3 sm:grid-cols-3">
-                                <div class="rounded-lg border border-green-200 bg-green-50 p-4"><p class="text-xs uppercase tracking-wide font-semibold text-green-900">{{ __('New') }}</p><p class="mt-1 text-2xl font-semibold text-green-900">{{ $comparison['new_count'] }}</p></div>
-                                <div class="rounded-lg border border-amber-200 bg-amber-50 p-4"><p class="text-xs uppercase tracking-wide font-semibold text-amber-900">{{ __('Resolved') }}</p><p class="mt-1 text-2xl font-semibold text-amber-900">{{ $comparison['resolved_count'] }}</p></div>
-                                <div class="rounded-lg border border-gray-200 bg-gray-50 p-4"><p class="text-xs uppercase tracking-wide font-semibold text-gray-900">{{ __('Unchanged') }}</p><p class="mt-1 text-2xl font-semibold text-gray-900">{{ $comparison['unchanged_count'] }}</p></div>
-                            </div>
-                        @endif
+                                </select>
+                                <button class="rounded-md bg-indigo-600 px-3 py-1.5 text-white">{{ __('Compare') }}</button>
+                            </form>
+                            @if ($comparison)
+                                <div class="mt-3 grid gap-3 sm:grid-cols-3">
+                                    <div class="rounded-lg border border-green-200 bg-green-50 p-4"><p class="text-xs uppercase tracking-wide font-semibold text-green-900">{{ __('New') }}</p><p class="mt-1 text-2xl font-semibold text-green-900">{{ $comparison['new_count'] }}</p></div>
+                                    <div class="rounded-lg border border-amber-200 bg-amber-50 p-4"><p class="text-xs uppercase tracking-wide font-semibold text-amber-900">{{ __('Resolved') }}</p><p class="mt-1 text-2xl font-semibold text-amber-900">{{ $comparison['resolved_count'] }}</p></div>
+                                    <div class="rounded-lg border border-gray-200 bg-gray-50 p-4"><p class="text-xs uppercase tracking-wide font-semibold text-gray-900">{{ __('Unchanged') }}</p><p class="mt-1 text-2xl font-semibold text-gray-900">{{ $comparison['unchanged_count'] }}</p></div>
+                                </div>
+                            @endif
+                        </div>
                     </div>
                 </div>
-            </div>
+            @endif
 
-            @if ($viewMode === 'executive')
+            @if (! $canViewTechnical || $viewMode === 'executive')
                 @include('scans.partials.report-executive', ['scan' => $scan, 'aiDecoded' => $aiDecoded, 'aiSummaryText' => $aiSummaryText])
             @else
                 @include('scans.partials.report-technical', ['scan' => $scan, 'zapFindings' => $zapFindings, 'niktoFindings' => $niktoFindings, 'aiDecoded' => $aiDecoded, 'aiSummaryText' => $aiSummaryText])

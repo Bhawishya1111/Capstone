@@ -9,6 +9,17 @@
                     {{ __('WAVe-Lite') }}
                 </h2>
                 <p class="text-sm text-gray-500 font-normal">{{ __('Security scanning operations dashboard') }}</p>
+                @php
+                    $role = strtolower((string) auth()->user()?->role);
+                    $rolePill = match ($role) {
+                        'admin' => 'bg-red-100 text-red-800 border-red-200',
+                        'analyst' => 'bg-amber-100 text-amber-800 border-amber-200',
+                        default => 'bg-blue-100 text-blue-800 border-blue-200',
+                    };
+                @endphp
+                <span class="mt-2 inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium {{ $rolePill }}">
+                    {{ __('Role') }}: {{ ucfirst($role ?: 'user') }}
+                </span>
             </div>
             <div class="text-xs text-gray-500">
                 {{ __('Last scan:') }}
@@ -86,6 +97,300 @@
                 </div>
             </div>
 
+            @if ($dashboardRole === 'admin')
+                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-medium text-gray-900">{{ __('Admin overview') }}</h3>
+                        <span class="text-xs text-gray-500">{{ __('System-level controls') }}</span>
+                    </div>
+                    <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5 text-sm">
+                        <div class="rounded-lg border border-gray-200 bg-gray-50 p-3"><p class="text-gray-500">{{ __('Total users') }}</p><p class="mt-1 text-xl font-semibold text-gray-900">{{ $adminMetrics['total_users'] }}</p></div>
+                        <div class="rounded-lg border border-amber-200 bg-amber-50 p-3"><p class="text-amber-700">{{ __('Pending approvals') }}</p><p class="mt-1 text-xl font-semibold text-amber-900">{{ $adminMetrics['pending_approvals'] ?? 'Not enabled' }}</p></div>
+                        <div class="rounded-lg border border-blue-200 bg-blue-50 p-3"><p class="text-blue-700">{{ __('Active scans') }}</p><p class="mt-1 text-xl font-semibold text-blue-900">{{ $adminMetrics['active_scans'] }}</p></div>
+                        <div class="rounded-lg border border-green-200 bg-green-50 p-3"><p class="text-green-700">{{ __('Enabled tools') }}</p><p class="mt-1 text-xl font-semibold text-green-900">{{ $adminMetrics['enabled_tools_count'] }}/3</p></div>
+                        <div class="rounded-lg border border-purple-200 bg-purple-50 p-3"><p class="text-purple-700">{{ __('Gemini summaries') }}</p><p class="mt-1 text-xl font-semibold text-purple-900">{{ $adminMetrics['gemini_usage']['total_ai_summaries'] }}</p></div>
+                    </div>
+                    <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3 text-sm">
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <h4 class="font-semibold text-gray-900">{{ __('Most scanned domains') }}</h4>
+                            <ul class="mt-2 space-y-1 text-gray-700">
+                                @forelse ($adminMetrics['most_scanned_domains'] as $domain => $count)
+                                    <li class="flex items-center justify-between"><span class="truncate pr-3">{{ $domain }}</span><span class="font-medium">{{ $count }}</span></li>
+                                @empty
+                                    <li class="text-gray-500">{{ __('No domain history yet.') }}</li>
+                                @endforelse
+                            </ul>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <h4 class="font-semibold text-gray-900">{{ __('Top risky targets') }}</h4>
+                            <ul class="mt-2 space-y-1 text-gray-700">
+                                @forelse ($adminMetrics['top_risky_targets'] as $target)
+                                    <li class="flex items-center justify-between gap-2"><span class="truncate">{{ \Illuminate\Support\Str::limit($target->url, 36) }}</span><span class="text-xs font-medium text-red-700">{{ (int) $target->risk_score }}</span></li>
+                                @empty
+                                    <li class="text-gray-500">{{ __('No risk data yet.') }}</li>
+                                @endforelse
+                            </ul>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <h4 class="font-semibold text-gray-900">{{ __('System health') }}</h4>
+                            <dl class="mt-2 space-y-1 text-gray-700">
+                                <div class="flex justify-between"><dt>{{ __('Queue depth') }}</dt><dd class="font-medium">{{ $adminMetrics['queue_depth'] ?? '—' }}</dd></div>
+                                <div class="flex justify-between"><dt>{{ __('Failed jobs (24h)') }}</dt><dd class="font-medium">{{ $adminMetrics['failed_jobs_24h'] ?? '—' }}</dd></div>
+                                <div class="flex justify-between"><dt>{{ __('False-positive trend') }}</dt><dd class="font-medium">{{ is_array($adminMetrics['false_positive_trends']) ? 'Tracked' : 'Not enabled' }}</dd></div>
+                            </dl>
+                        </div>
+                    </div>
+                </div>
+            @elseif ($dashboardRole === 'analyst')
+                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <h3 class="text-lg font-medium text-gray-900">{{ __('Analyst workspace') }}</h3>
+                    <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 text-sm">
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <h4 class="font-semibold text-gray-900">{{ __('Owned targets') }}</h4>
+                            <ul class="mt-2 space-y-1 text-gray-700">
+                                @forelse ($analystMetrics['owned_targets'] as $target)
+                                    <li class="truncate">{{ $target }}</li>
+                                @empty
+                                    <li class="text-gray-500">{{ __('No owned targets yet.') }}</li>
+                                @endforelse
+                            </ul>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <h4 class="font-semibold text-gray-900">{{ __('Findings by scanner') }}</h4>
+                            <dl class="mt-2 space-y-1 text-gray-700">
+                                <div class="flex justify-between"><dt>ZAP</dt><dd class="font-medium">{{ (int) ($analystMetrics['findings_by_scanner']['zap'] ?? 0) }}</dd></div>
+                                <div class="flex justify-between"><dt>Nikto</dt><dd class="font-medium">{{ (int) ($analystMetrics['findings_by_scanner']['nikto'] ?? 0) }}</dd></div>
+                            </dl>
+                            <p class="mt-3 text-xs text-gray-500">
+                                {{ __('Raw outputs available for') }} {{ $analystMetrics['raw_output_available_scans'] }}/{{ $analystMetrics['raw_output_total_scans'] }} {{ __('scans') }}.
+                            </p>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <h4 class="font-semibold text-gray-900">{{ __('Validation status') }}</h4>
+                            @if (is_array($analystMetrics['validation_summary']))
+                                <ul class="mt-2 space-y-1 text-gray-700">
+                                    @foreach ($analystMetrics['validation_summary'] as $state => $count)
+                                        <li class="flex justify-between"><span>{{ ucfirst((string) $state) }}</span><span class="font-medium">{{ $count }}</span></li>
+                                    @endforeach
+                                </ul>
+                            @else
+                                <p class="mt-2 text-gray-500">{{ __('Confirmed / false-positive / needs-review workflow is not enabled yet.') }}</p>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+            @else
+                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <h3 class="text-lg font-medium text-gray-900">{{ __('Website safety overview') }}</h3>
+                    @php
+                        $score = (int) ($basicMetrics['security_score'] ?? 0);
+                        $status = $score >= 75 ? 'green' : ($score >= 45 ? 'amber' : 'red');
+                        $statusClass = match ($status) {
+                            'green' => 'bg-green-100 text-green-800 border-green-200',
+                            'amber' => 'bg-amber-100 text-amber-800 border-amber-200',
+                            default => 'bg-red-100 text-red-800 border-red-200',
+                        };
+                    @endphp
+                    <div class="mt-3 flex flex-wrap items-center gap-3">
+                        <span class="inline-flex rounded-full border px-3 py-1 text-sm font-medium {{ $statusClass }}">{{ strtoupper($status) }}</span>
+                        <p class="text-lg font-semibold text-gray-900">{{ __('Security score') }}: {{ $score }}/100</p>
+                    </div>
+                    <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3 text-sm">
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <h4 class="font-semibold text-gray-900">{{ __('Top concerns') }}</h4>
+                            <ol class="mt-2 list-decimal list-inside text-gray-700 space-y-1">
+                                @foreach ($adminMetrics['most_common_vulnerabilities']->take(3) as $v)
+                                    <li>{{ \Illuminate\Support\Str::limit($v->title, 70) }}</li>
+                                @endforeach
+                                @if ($adminMetrics['most_common_vulnerabilities']->isEmpty())
+                                    <li>{{ __('No major concerns detected yet.') }}</li>
+                                @endif
+                            </ol>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <h4 class="font-semibold text-gray-900">{{ __('What this means') }}</h4>
+                            <p class="mt-2 text-gray-700">
+                                {{ __('This score helps you quickly understand the current security risk of your scanned assets. Lower score means more urgent issues need attention.') }}
+                            </p>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 p-4">
+                            <h4 class="font-semibold text-gray-900">{{ __('Recommended actions') }}</h4>
+                            <ul class="mt-2 list-disc list-inside text-gray-700 space-y-1">
+                                <li>{{ __('Fix critical and high findings first.') }}</li>
+                                <li>{{ __('Re-scan after remediation to verify risk reduction.') }}</li>
+                                <li>{{ __('Share executive summary with business stakeholders.') }}</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            @endif
+
+            <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm lg:col-span-2">
+                    <div class="flex items-center justify-between gap-4">
+                        <h3 class="text-lg font-medium text-gray-900">{{ __('Risk posture') }}</h3>
+                        <span class="text-xs text-gray-500">{{ __('From all findings you can access') }}</span>
+                    </div>
+                    <div class="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
+                        <div class="rounded-lg border border-red-200 bg-red-50 p-3">
+                            <p class="text-[11px] uppercase tracking-wide text-red-700">{{ __('Critical') }}</p>
+                            <p class="mt-1 text-xl font-semibold text-red-900">{{ $riskSummary['critical'] }}</p>
+                        </div>
+                        <div class="rounded-lg border border-orange-200 bg-orange-50 p-3">
+                            <p class="text-[11px] uppercase tracking-wide text-orange-700">{{ __('High') }}</p>
+                            <p class="mt-1 text-xl font-semibold text-orange-900">{{ $riskSummary['high'] }}</p>
+                        </div>
+                        <div class="rounded-lg border border-yellow-200 bg-yellow-50 p-3">
+                            <p class="text-[11px] uppercase tracking-wide text-yellow-700">{{ __('Medium') }}</p>
+                            <p class="mt-1 text-xl font-semibold text-yellow-900">{{ $riskSummary['medium'] }}</p>
+                        </div>
+                        <div class="rounded-lg border border-blue-200 bg-blue-50 p-3">
+                            <p class="text-[11px] uppercase tracking-wide text-blue-700">{{ __('Low') }}</p>
+                            <p class="mt-1 text-xl font-semibold text-blue-900">{{ $riskSummary['low'] }}</p>
+                        </div>
+                        <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                            <p class="text-[11px] uppercase tracking-wide text-gray-700">{{ __('Info') }}</p>
+                            <p class="mt-1 text-xl font-semibold text-gray-900">{{ $riskSummary['info'] }}</p>
+                        </div>
+                    </div>
+                    <div class="mt-4 h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                        @php
+                            $totalRisk = max(1, (int) $riskSummary['total']);
+                            $criticalPct = ($riskSummary['critical'] / $totalRisk) * 100;
+                            $highPct = ($riskSummary['high'] / $totalRisk) * 100;
+                            $mediumPct = ($riskSummary['medium'] / $totalRisk) * 100;
+                            $lowPct = ($riskSummary['low'] / $totalRisk) * 100;
+                            $infoPct = ($riskSummary['info'] / $totalRisk) * 100;
+                        @endphp
+                        <div class="flex h-full w-full">
+                            <div class="bg-red-500" style="width: {{ $criticalPct }}%"></div>
+                            <div class="bg-orange-400" style="width: {{ $highPct }}%"></div>
+                            <div class="bg-yellow-400" style="width: {{ $mediumPct }}%"></div>
+                            <div class="bg-blue-400" style="width: {{ $lowPct }}%"></div>
+                            <div class="bg-gray-400" style="width: {{ $infoPct }}%"></div>
+                        </div>
+                    </div>
+                    <p class="mt-3 text-xs text-gray-500">
+                        {{ __('Nikto coverage:') }}
+                        <span class="font-medium text-gray-700">{{ $completedWithNikto }}</span>
+                        {{ __('of') }}
+                        <span class="font-medium text-gray-700">{{ $stats['completed_scans'] }}</span>
+                        {{ __('completed scans produced Nikto output.') }}
+                    </p>
+                </div>
+                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <h3 class="text-lg font-medium text-gray-900">{{ __('Quick actions') }}</h3>
+                    <div class="mt-4 space-y-2 text-sm">
+                        <a href="{{ route('dashboard') }}" class="block rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 font-medium text-indigo-700 hover:bg-indigo-100">{{ __('Refresh dashboard') }}</a>
+                        <a href="{{ route('profile.edit') }}" class="block rounded-md border border-gray-200 bg-gray-50 px-3 py-2 font-medium text-gray-700 hover:bg-gray-100">{{ __('Manage profile') }}</a>
+                        @if (auth()->user()?->isAdmin())
+                            <a href="{{ route('users.index') }}" class="block rounded-md border border-amber-200 bg-amber-50 px-3 py-2 font-medium text-amber-800 hover:bg-amber-100">{{ __('Manage users & roles') }}</a>
+                        @endif
+                    </div>
+                    <p class="mt-4 text-xs text-gray-500">{{ __('Tip: Use the report page for remediation tracking and scan comparisons.') }}</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                    <h3 class="text-lg font-medium text-gray-900">{{ __('Risk chart') }}</h3>
+                    @php
+                        $totalRisk = max(1, (int) $riskSummary['total']);
+                        $criticalAngle = ($riskSummary['critical'] / $totalRisk) * 360;
+                        $highAngle = ($riskSummary['high'] / $totalRisk) * 360;
+                        $mediumAngle = ($riskSummary['medium'] / $totalRisk) * 360;
+                        $lowAngle = ($riskSummary['low'] / $totalRisk) * 360;
+                        $criticalEnd = $criticalAngle;
+                        $highEnd = $criticalEnd + $highAngle;
+                        $mediumEnd = $highEnd + $mediumAngle;
+                        $lowEnd = $mediumEnd + $lowAngle;
+                    @endphp
+                    <div class="mt-3 inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
+                        <button
+                            type="button"
+                            data-risk-toggle="pie"
+                            class="rounded-md bg-white px-2.5 py-1 font-medium text-gray-800 shadow-sm"
+                        >
+                            {{ __('Pie') }}
+                        </button>
+                        <button
+                            type="button"
+                            data-risk-toggle="bar"
+                            class="rounded-md px-2.5 py-1 font-medium text-gray-600 hover:text-gray-800"
+                        >
+                            {{ __('Bar') }}
+                        </button>
+                    </div>
+                    <div class="mt-4 flex flex-col items-center gap-4">
+                        <div
+                            data-risk-pie
+                            class="h-40 w-40 rounded-full border border-gray-200"
+                            style="background: conic-gradient(#ef4444 0deg {{ $criticalEnd }}deg, #fb923c {{ $criticalEnd }}deg {{ $highEnd }}deg, #facc15 {{ $highEnd }}deg {{ $mediumEnd }}deg, #60a5fa {{ $mediumEnd }}deg {{ $lowEnd }}deg, #9ca3af {{ $lowEnd }}deg 360deg);"
+                            title="{{ __('Pie chart of findings by severity') }}"
+                        ></div>
+                        <div data-risk-bars class="hidden w-full space-y-2">
+                            @php
+                                $rows = [
+                                    ['key' => 'critical', 'label' => __('Critical'), 'color' => 'bg-red-500'],
+                                    ['key' => 'high', 'label' => __('High'), 'color' => 'bg-orange-400'],
+                                    ['key' => 'medium', 'label' => __('Medium'), 'color' => 'bg-yellow-400'],
+                                    ['key' => 'low', 'label' => __('Low'), 'color' => 'bg-blue-400'],
+                                    ['key' => 'info', 'label' => __('Info'), 'color' => 'bg-gray-400'],
+                                ];
+                            @endphp
+                            @foreach ($rows as $row)
+                                @php
+                                    $count = (int) ($riskSummary[$row['key']] ?? 0);
+                                    $pct = ($count / $totalRisk) * 100;
+                                @endphp
+                                <div>
+                                    <div class="mb-1 flex items-center justify-between text-xs">
+                                        <span class="text-gray-700">{{ $row['label'] }}</span>
+                                        <span class="font-medium text-gray-800">{{ $count }} ({{ number_format($pct, 1) }}%)</span>
+                                    </div>
+                                    <div class="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                                        <div class="h-full rounded-full {{ $row['color'] }}" style="width: {{ $pct }}%"></div>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                        <div class="grid w-full grid-cols-2 gap-2 text-xs">
+                            <button type="button" data-risk-item="critical" data-risk-label="{{ __('Critical') }}" data-risk-count="{{ $riskSummary['critical'] }}" data-risk-total="{{ $totalRisk }}" class="flex items-center gap-2 text-left"><span class="h-2.5 w-2.5 rounded-full bg-red-500"></span><span>{{ __('Critical') }}: {{ $riskSummary['critical'] }}</span></button>
+                            <button type="button" data-risk-item="high" data-risk-label="{{ __('High') }}" data-risk-count="{{ $riskSummary['high'] }}" data-risk-total="{{ $totalRisk }}" class="flex items-center gap-2 text-left"><span class="h-2.5 w-2.5 rounded-full bg-orange-400"></span><span>{{ __('High') }}: {{ $riskSummary['high'] }}</span></button>
+                            <button type="button" data-risk-item="medium" data-risk-label="{{ __('Medium') }}" data-risk-count="{{ $riskSummary['medium'] }}" data-risk-total="{{ $totalRisk }}" class="flex items-center gap-2 text-left"><span class="h-2.5 w-2.5 rounded-full bg-yellow-400"></span><span>{{ __('Medium') }}: {{ $riskSummary['medium'] }}</span></button>
+                            <button type="button" data-risk-item="low" data-risk-label="{{ __('Low') }}" data-risk-count="{{ $riskSummary['low'] }}" data-risk-total="{{ $totalRisk }}" class="flex items-center gap-2 text-left"><span class="h-2.5 w-2.5 rounded-full bg-blue-400"></span><span>{{ __('Low') }}: {{ $riskSummary['low'] }}</span></button>
+                            <button type="button" data-risk-item="info" data-risk-label="{{ __('Info') }}" data-risk-count="{{ $riskSummary['info'] }}" data-risk-total="{{ $totalRisk }}" class="col-span-2 flex items-center gap-2 text-left"><span class="h-2.5 w-2.5 rounded-full bg-gray-400"></span><span>{{ __('Info') }}: {{ $riskSummary['info'] }}</span></button>
+                        </div>
+                        <p data-risk-hover class="w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                            {{ __('Hover or tap a severity to view percentage details.') }}
+                        </p>
+                        <div class="w-full text-xs text-gray-500">
+                            {{ __('Total findings represented:') }} <span class="font-medium text-gray-700">{{ $riskSummary['total'] }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm lg:col-span-2">
+                    <div class="flex items-center justify-between gap-3">
+                        <h3 class="text-lg font-medium text-gray-900">{{ __('Gemini AI insight') }}</h3>
+                        @if ($latestAiScan)
+                            <a href="{{ route('scans.report', ['scan' => $latestAiScan->id, 'view' => auth()->user()?->canViewTechnicalReports() ? 'technical' : 'executive']) }}" class="text-xs font-medium text-indigo-700 hover:text-indigo-900">
+                                {{ __('From scan #') }}{{ $latestAiScan->id }}
+                            </a>
+                        @endif
+                    </div>
+                    @if (! empty($dashboardAiInsight))
+                        <p class="mt-3 rounded-md border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-950 whitespace-pre-wrap">{{ $dashboardAiInsight }}</p>
+                        @if ($latestAiScan?->completed_at)
+                            <p class="mt-2 text-xs text-gray-500">
+                                {{ __('Generated for') }} {{ $latestAiScan->url }} · {{ $latestAiScan->completed_at->diffForHumans() }}
+                            </p>
+                        @endif
+                    @else
+                        <p class="mt-3 text-sm text-gray-500">{{ __('No Gemini insight yet. Complete a scan and this panel will show the latest AI summary.') }}</p>
+                    @endif
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 gap-6 xl:grid-cols-3">
                 <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm xl:col-span-2">
                     <h3 class="text-lg font-medium text-gray-900">{{ __('Start scan') }}</h3>
@@ -129,6 +434,46 @@
                         </div>
                     </dl>
                     <p class="mt-4 text-xs text-gray-500">{{ __('Tip: Keep a queue worker running to avoid stalled scans.') }}</p>
+                </div>
+            </div>
+
+            <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                <div class="border-b border-gray-200 px-6 py-4">
+                    <h3 class="text-lg font-medium text-gray-900">{{ __('Recent findings feed') }}</h3>
+                </div>
+                <div class="divide-y divide-gray-100">
+                    @forelse ($recentFindings as $finding)
+                        @php
+                            $sev = strtolower((string) ($finding->normalized_severity ?: $finding->severity ?: 'info'));
+                            $sevClass = match ($sev) {
+                                'critical' => 'bg-red-100 text-red-800',
+                                'high' => 'bg-orange-100 text-orange-800',
+                                'medium' => 'bg-yellow-100 text-yellow-800',
+                                'low' => 'bg-blue-100 text-blue-800',
+                                default => 'bg-gray-100 text-gray-700',
+                            };
+                        @endphp
+                        <div class="px-6 py-3">
+                            <div class="flex flex-wrap items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                    <p class="font-medium text-gray-900 break-words">{{ $finding->title }}</p>
+                                    <p class="mt-1 text-xs text-gray-500 break-all">
+                                        {{ strtoupper($finding->source) }} · {{ \Illuminate\Support\Str::limit((string) $finding->endpoint, 90) ?: 'No endpoint provided' }}
+                                    </p>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium {{ $sevClass }}">{{ strtoupper($sev) }}</span>
+                                    @if ($finding->scan)
+                                        <a href="{{ route('scans.report', ['scan' => $finding->scan->id, 'view' => auth()->user()?->canViewTechnicalReports() ? 'technical' : 'executive']) }}" class="text-xs font-medium text-indigo-700 hover:text-indigo-900">
+                                            {{ __('Scan #') }}{{ $finding->scan->id }}
+                                        </a>
+                                    @endif
+                                </div>
+                            </div>
+                        </div>
+                    @empty
+                        <div class="px-6 py-8 text-center text-sm text-gray-500">{{ __('No findings yet.') }}</div>
+                    @endforelse
                 </div>
             </div>
 
@@ -236,7 +581,7 @@
                                     </td>
                                     <td class="px-6 py-3 text-right whitespace-nowrap">
                                         <div class="inline-flex items-center gap-2">
-                                        <a href="{{ route('scans.report', $scan) }}" class="inline-flex rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-indigo-700 hover:bg-indigo-100 font-medium">
+                                        <a href="{{ route('scans.report', ['scan' => $scan->id, 'view' => auth()->user()?->canViewTechnicalReports() ? 'technical' : 'executive']) }}" class="inline-flex rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-indigo-700 hover:bg-indigo-100 font-medium">
                                             {{ __('Report') }}
                                         </a>
                                         <form method="POST" action="{{ route('scans.destroy', $scan) }}" onsubmit="return confirm('Delete this scan? This cannot be undone.');" class="inline">

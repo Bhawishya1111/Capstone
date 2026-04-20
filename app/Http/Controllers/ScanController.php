@@ -4,13 +4,16 @@ namespace App\Http\Controllers;
 
 use App\Jobs\RunWaveScanJob;
 use App\Models\Scan;
+use App\Models\ScanFinding;
 use App\Models\User;
 use App\Models\Website;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -53,6 +56,156 @@ class ScanController extends Controller
             Scan::STATUS_FAILED => $failedScansCount,
         ];
 
+        $visibleScanIds = Scan::query()->visibleToUser($user)->select('id');
+        $severityCounts = ScanFinding::query()
+            ->whereIn('scan_id', $visibleScanIds)
+            ->selectRaw('LOWER(COALESCE(NULLIF(normalized_severity, \'\'), severity, \'info\')) as sev, COUNT(*) as c')
+            ->groupBy('sev')
+            ->pluck('c', 'sev')
+            ->all();
+
+        $riskSummary = [
+            'critical' => (int) ($severityCounts['critical'] ?? 0),
+            'high' => (int) ($severityCounts['high'] ?? 0),
+            'medium' => (int) ($severityCounts['medium'] ?? 0),
+            'low' => (int) ($severityCounts['low'] ?? 0),
+            'info' => (int) ($severityCounts['info'] ?? 0),
+        ];
+        $riskSummary['total'] = array_sum($riskSummary);
+
+        $completedWithNikto = (clone $scansQuery)
+            ->where('status', Scan::STATUS_COMPLETED)
+            ->whereNotNull('nikto_raw_output_path')
+            ->where('nikto_raw_output_path', '!=', '')
+            ->count();
+
+        $recentFindings = ScanFinding::query()
+            ->whereIn('scan_id', Scan::query()->visibleToUser($user)->select('id'))
+            ->with(['scan:id,url,created_at'])
+            ->latest('id')
+            ->limit(8)
+            ->get(['id', 'scan_id', 'source', 'title', 'normalized_severity', 'severity', 'endpoint']);
+
+        $latestAiScan = (clone $scansQuery)
+            ->where('status', Scan::STATUS_COMPLETED)
+            ->whereNotNull('ai_summary')
+            ->where('ai_summary', '!=', '')
+            ->orderByDesc('completed_at')
+            ->first(['id', 'url', 'ai_summary', 'completed_at']);
+
+        $dashboardAiInsight = null;
+        if ($latestAiScan && is_string($latestAiScan->ai_summary)) {
+            $decoded = json_decode($latestAiScan->ai_summary, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $exec = data_get($decoded, 'executive_summary');
+                $dashboardAiInsight = is_string($exec) ? trim($exec) : null;
+            } else {
+                $dashboardAiInsight = trim($latestAiScan->ai_summary);
+            }
+        }
+
+        $analyticsScans = Scan::query()
+            ->visibleToUser($user)
+            ->orderByDesc('created_at')
+            ->limit(300)
+            ->get(['id', 'user_id', 'url', 'status', 'created_at', 'completed_at', 'ai_summary', 'zap_raw_output_path', 'nikto_raw_output_path']);
+
+        $ownedTargets = $analyticsScans
+            ->where('user_id', $user->id)
+            ->pluck('url')
+            ->filter()
+            ->unique()
+            ->take(8)
+            ->values();
+
+        $mostScannedDomains = $analyticsScans
+            ->map(function (Scan $scan): ?string {
+                $host = parse_url($scan->url, PHP_URL_HOST);
+
+                return is_string($host) && $host !== '' ? strtolower($host) : null;
+            })
+            ->filter()
+            ->countBy()
+            ->sortDesc()
+            ->take(8);
+
+        $mostCommonVulns = ScanFinding::query()
+            ->whereIn('scan_id', Scan::query()->visibleToUser($user)->select('id'))
+            ->selectRaw('title, COUNT(*) as total')
+            ->groupBy('title')
+            ->orderByDesc('total')
+            ->limit(8)
+            ->get();
+
+        $findingsByScanner = ScanFinding::query()
+            ->whereIn('scan_id', Scan::query()->visibleToUser($user)->select('id'))
+            ->selectRaw('source, COUNT(*) as total')
+            ->groupBy('source')
+            ->pluck('total', 'source')
+            ->all();
+
+        $geminiUsage = [
+            'total_ai_summaries' => $analyticsScans->filter(fn (Scan $s) => is_string($s->ai_summary) && trim($s->ai_summary) !== '')->count(),
+            'last_24h' => $analyticsScans
+                ->filter(fn (Scan $s) => $s->created_at && $s->created_at->gte(now()->subDay()) && is_string($s->ai_summary) && trim($s->ai_summary) !== '')
+                ->count(),
+        ];
+
+        $pendingApprovals = null;
+        if (Schema::hasColumn('users', 'is_approved')) {
+            $pendingApprovals = User::query()->where('is_approved', false)->count();
+        } elseif (Schema::hasColumn('users', 'approved_at')) {
+            $pendingApprovals = User::query()->whereNull('approved_at')->count();
+        } elseif (Schema::hasColumn('users', 'status')) {
+            $pendingApprovals = User::query()->where('status', 'pending')->count();
+        }
+
+        $validationSummary = null;
+        if (Schema::hasColumn('scan_findings', 'validation_status')) {
+            $validationSummary = ScanFinding::query()
+                ->whereIn('scan_id', Scan::query()->visibleToUser($user)->select('id'))
+                ->selectRaw('validation_status, COUNT(*) as c')
+                ->groupBy('validation_status')
+                ->pluck('c', 'validation_status')
+                ->all();
+        }
+
+        $queueDepth = Schema::hasTable('jobs') ? DB::table('jobs')->count() : null;
+        $failedJobs24h = Schema::hasTable('failed_jobs')
+            ? DB::table('failed_jobs')->where('failed_at', '>=', now()->subDay())->count()
+            : null;
+
+        $topRiskyTargets = DB::table('scan_findings as f')
+            ->join('scans as s', 's.id', '=', 'f.scan_id')
+            ->whereIn('s.id', Scan::query()->visibleToUser($user)->select('id'))
+            ->selectRaw("
+                s.url,
+                COUNT(*) as findings,
+                SUM(
+                    CASE LOWER(COALESCE(NULLIF(f.normalized_severity, ''), f.severity, 'info'))
+                        WHEN 'critical' THEN 10
+                        WHEN 'high' THEN 6
+                        WHEN 'medium' THEN 3
+                        WHEN 'low' THEN 1
+                        ELSE 0
+                    END
+                ) as risk_score
+            ")
+            ->groupBy('s.url')
+            ->orderByDesc('risk_score')
+            ->limit(6)
+            ->get();
+
+        $riskScoreHistory = $this->buildRiskScoreHistory($analyticsScans, $user->id);
+
+        $enabledTools = [
+            'zap' => (bool) (config('wave.zap_local.host') && config('wave.zap_local.port')),
+            'nikto' => (bool) config('wave.nikto.enabled', true),
+            'gemini' => (bool) config('wave.gemini.api_key'),
+        ];
+
+        $role = strtolower((string) $user->role);
+
         $scans = Scan::query()
             ->visibleToUser($user)
             ->with('website')
@@ -68,8 +221,101 @@ class ScanController extends Controller
         return view('dashboard', [
             'stats' => $stats,
             'statusBreakdown' => $statusBreakdown,
+            'riskSummary' => $riskSummary,
+            'completedWithNikto' => $completedWithNikto,
+            'recentFindings' => $recentFindings,
+            'dashboardAiInsight' => $dashboardAiInsight,
+            'latestAiScan' => $latestAiScan,
+            'dashboardRole' => $role,
+            'dashboardModules' => [
+                'auth_2fa_enabled' => Schema::hasColumn('users', 'two_factor_secret'),
+                'user_approval_workflow' => $pendingApprovals !== null,
+                'target_management_enabled' => Schema::hasTable('websites'),
+            ],
+            'adminMetrics' => [
+                'total_users' => User::query()->count(),
+                'pending_approvals' => $pendingApprovals,
+                'active_scans' => $stats['queued_scans'] + $stats['running_scans'],
+                'enabled_tools_count' => collect($enabledTools)->filter()->count(),
+                'enabled_tools' => $enabledTools,
+                'most_common_vulnerabilities' => $mostCommonVulns,
+                'severity_distribution' => $riskSummary,
+                'queue_depth' => $queueDepth,
+                'failed_jobs_24h' => $failedJobs24h,
+                'gemini_usage' => $geminiUsage,
+                'false_positive_trends' => $validationSummary,
+                'most_scanned_domains' => $mostScannedDomains,
+                'top_risky_targets' => $topRiskyTargets,
+            ],
+            'analystMetrics' => [
+                'owned_targets' => $ownedTargets,
+                'findings_by_scanner' => $findingsByScanner,
+                'top_repeated_vulnerabilities' => $mostCommonVulns,
+                'raw_output_available_scans' => $analyticsScans
+                    ->filter(fn (Scan $s) => ! empty($s->zap_raw_output_path) || ! empty($s->nikto_raw_output_path))
+                    ->count(),
+                'raw_output_total_scans' => $analyticsScans->count(),
+                'risk_score_history' => $riskScoreHistory,
+                'validation_summary' => $validationSummary,
+            ],
+            'basicMetrics' => [
+                'security_score' => max(0, 100 - (int) (
+                    ($riskSummary['critical'] * 7)
+                    + ($riskSummary['high'] * 4)
+                    + ($riskSummary['medium'] * 2)
+                    + ($riskSummary['low'] * 1)
+                )),
+                'risk_score_history' => $riskScoreHistory,
+            ],
             'scans' => $scans,
         ]);
+    }
+
+    /**
+     * @return array<int, array{label: string, score: int}>
+     */
+    private function buildRiskScoreHistory(Collection $analyticsScans, int $userId): array
+    {
+        $scanIds = $analyticsScans
+            ->filter(fn (Scan $s) => $s->status === Scan::STATUS_COMPLETED)
+            ->sortBy('created_at')
+            ->pluck('id')
+            ->take(8)
+            ->values();
+
+        if ($scanIds->isEmpty()) {
+            return [];
+        }
+
+        $scores = ScanFinding::query()
+            ->whereIn('scan_id', $scanIds)
+            ->selectRaw("
+                scan_id,
+                SUM(
+                    CASE LOWER(COALESCE(NULLIF(normalized_severity, ''), severity, 'info'))
+                        WHEN 'critical' THEN 10
+                        WHEN 'high' THEN 6
+                        WHEN 'medium' THEN 3
+                        WHEN 'low' THEN 1
+                        ELSE 0
+                    END
+                ) as risk_score
+            ")
+            ->groupBy('scan_id')
+            ->pluck('risk_score', 'scan_id');
+
+        return $scanIds
+            ->map(function (int $scanId) use ($analyticsScans, $scores): array {
+                /** @var Scan|null $scan */
+                $scan = $analyticsScans->firstWhere('id', $scanId);
+
+                return [
+                    'label' => $scan?->created_at?->format('m-d') ?? (string) $scanId,
+                    'score' => (int) ($scores[$scanId] ?? 0),
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     public function storeWebsite(Request $request): RedirectResponse
@@ -232,11 +478,16 @@ class ScanController extends Controller
 
     public function report(Request $request, Scan $scan): View
     {
-        $this->ensureCanViewScan($request->user(), $scan);
+        $user = $request->user();
+        $this->ensureCanViewScan($user, $scan);
+        $canViewTechnical = $user->canViewTechnicalReports();
         $scan->load(['website', 'findings', 'user']);
         $viewMode = $request->query('view', 'technical');
         if (! in_array($viewMode, ['technical', 'executive'], true)) {
             $viewMode = 'technical';
+        }
+        if (! $canViewTechnical) {
+            $viewMode = 'executive';
         }
 
         $compareScanId = $request->query('compare_scan_id');
@@ -264,23 +515,28 @@ class ScanController extends Controller
             }
         }
 
-        $rawAvailable = [
-            'zap' => $this->rawFileExists($scan->zap_raw_output_path),
-            'nikto' => $this->rawFileExists($scan->nikto_raw_output_path),
-            'combined' => $this->rawFileExists($scan->combined_raw_output_path),
-        ];
+        $rawAvailable = $canViewTechnical
+            ? [
+                'zap' => $this->rawFileExists($scan->zap_raw_output_path),
+                'nikto' => $this->rawFileExists($scan->nikto_raw_output_path),
+                'combined' => $this->rawFileExists($scan->combined_raw_output_path),
+            ]
+            : ['zap' => false, 'nikto' => false, 'combined' => false];
 
-        $trendSeries = $this->buildTrendSeries($scan);
-        $comparableScans = Scan::query()
-            ->where('website_id', $scan->website_id)
-            ->where('id', '!=', $scan->id)
-            ->whereNotNull('completed_at')
-            ->orderByDesc('completed_at')
-            ->limit(20)
-            ->get(['id', 'completed_at', 'status', 'url']);
+        $trendSeries = $canViewTechnical ? $this->buildTrendSeries($scan) : [];
+        $comparableScans = $canViewTechnical
+            ? Scan::query()
+                ->where('website_id', $scan->website_id)
+                ->where('id', '!=', $scan->id)
+                ->whereNotNull('completed_at')
+                ->orderByDesc('completed_at')
+                ->limit(20)
+                ->get(['id', 'completed_at', 'status', 'url'])
+            : collect();
 
         return view('scans.report', [
             'scan' => $scan,
+            'canViewTechnical' => $canViewTechnical,
             'aiDecoded' => $aiDecoded,
             'aiSummaryText' => $aiSummaryText,
             'rawAvailable' => $rawAvailable,
@@ -288,7 +544,7 @@ class ScanController extends Controller
             'trendSeries' => $trendSeries,
             'comparableScans' => $comparableScans,
             'compareScan' => $compareScan,
-            'comparison' => $this->buildComparison($scan, $compareScan),
+            'comparison' => $canViewTechnical ? $this->buildComparison($scan, $compareScan) : null,
         ]);
     }
 
@@ -297,7 +553,11 @@ class ScanController extends Controller
      */
     public function downloadRaw(Request $request, Scan $scan, string $kind): StreamedResponse
     {
-        $this->ensureCanViewScan($request->user(), $scan);
+        $user = $request->user();
+        $this->ensureCanViewScan($user, $scan);
+        if (! $user->canViewTechnicalReports()) {
+            abort(403);
+        }
 
         $column = match ($kind) {
             'zap' => 'zap_raw_output_path',
