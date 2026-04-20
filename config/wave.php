@@ -26,6 +26,12 @@ return [
         'host' => env('ZAP_HOST'),
         'port' => (int) env('ZAP_PORT', 8080),
         'api_key' => env('ZAP_API_KEY'),
+        /** Limit spider breadth for faster scans. */
+        'max_children' => (int) env('ZAP_MAX_CHILDREN', 12),
+        /** Max seconds to wait for spider completion. */
+        'spider_timeout' => (int) env('ZAP_SPIDER_TIMEOUT', 240),
+        /** Max seconds to wait for passive scan queue to drain. */
+        'pscan_wait' => (int) env('ZAP_PSCAN_WAIT', 45),
     ],
 
     /**
@@ -40,8 +46,21 @@ return [
     'nikto' => [
         'enabled' => env('NIKTO_ENABLED', true),
         'binary' => env('NIKTO_BINARY', 'nikto'),
-        /** Per-host cap, e.g. 5m, 10m, 3600s (passed to nikto -maxtime). */
-        'maxtime' => env('NIKTO_MAXTIME', '10m'),
+        /** Per-host cap, e.g. 3m, 5m, 600s (passed to nikto -maxtime). */
+        'maxtime' => env('NIKTO_MAXTIME', '4m'),
+        /** Hard process timeout in seconds (prevents hung Nikto runs). */
+        'process_timeout' => (int) env('NIKTO_PROCESS_TIMEOUT', 300),
+    ],
+
+    /**
+     * Nuclei template-based scan (optional).
+     */
+    'nuclei' => [
+        'enabled' => env('NUCLEI_ENABLED', false),
+        'binary' => env('NUCLEI_BINARY', 'nuclei'),
+        'templates' => env('NUCLEI_TEMPLATES'),
+        'severity' => env('NUCLEI_SEVERITY', 'critical,high,medium'),
+        'timeout' => (int) env('NUCLEI_TIMEOUT', 240),
     ],
 
     /**
@@ -49,8 +68,17 @@ return [
      */
     'gemini' => [
         'api_key' => env('GEMINI_API_KEY'),
-        'model' => env('GEMINI_MODEL', 'gemini-1.5-flash'),
+        'model' => env('GEMINI_MODEL', 'gemini-2.5-flash'),
         'timeout' => (int) env('GEMINI_TIMEOUT', 60),
+    ],
+
+    /**
+     * Groq advisory analysis fallback (OpenAI-compatible chat API).
+     */
+    'groq' => [
+        'api_key' => env('GROQ_API_KEY'),
+        'model' => env('GROQ_MODEL', 'llama-3.3-70b-versatile'),
+        'timeout' => (int) env('GROQ_TIMEOUT', 60),
     ],
 
     /**

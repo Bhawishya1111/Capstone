@@ -24,6 +24,10 @@ class RunWaveScanJob implements ShouldQueue
 
     public int $timeout = 3600;
 
+    private ?string $geminiFailureReason = null;
+
+    private ?string $groqFailureReason = null;
+
     public function __construct(public int $scanId) {}
 
     public function handle(): void
@@ -33,12 +37,27 @@ class RunWaveScanJob implements ShouldQueue
             return;
         }
 
+        // Stale retried jobs can be left in the queue after a scan is already finished.
+        // Skip them immediately so newer scans are not blocked behind old work.
+        if (in_array($scan->status, [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED], true)) {
+            Log::info('WAVe-Lite: skipping stale scan job', [
+                'scan_id' => $scan->id,
+                'status' => $scan->status,
+            ]);
+
+            return;
+        }
+
         $prefix = "scans/{$scan->id}";
         Storage::disk('local')->makeDirectory($prefix);
         $workAbs = Storage::disk('local')->path($prefix);
 
         try {
             $this->touchProgress($scan, 5, Scan::PHASE_STARTING);
+            $scan = $this->refreshScanOrStop();
+            if (! $scan) {
+                return;
+            }
 
             $zapRelative = "{$prefix}/zap-report.json";
             $zapAbs = Storage::disk('local')->path($zapRelative);
@@ -88,6 +107,10 @@ class RunWaveScanJob implements ShouldQueue
                 );
             }
 
+            $scan = $this->refreshScanOrStop();
+            if (! $scan) {
+                return;
+            }
             $scan->zap_raw_output_path = $zapRelative;
             $scan->save();
 
@@ -95,13 +118,28 @@ class RunWaveScanJob implements ShouldQueue
             $this->ingestZapReport($scan, $zapAbs);
 
             $this->touchProgress($scan, 85, Scan::PHASE_NIKTO);
+            $scan = $this->refreshScanOrStop();
+            if (! $scan) {
+                return;
+            }
             $this->runNiktoIfConfigured($scan, $prefix);
+
+            $this->touchProgress($scan, 89, Scan::PHASE_NUCLEI);
+            $scan = $this->refreshScanOrStop();
+            if (! $scan) {
+                return;
+            }
+            $this->runNucleiIfConfigured($scan, $prefix);
 
             $combinedRelative = "{$prefix}/combined-summary.txt";
             $this->writeCombinedSummary($scan, Storage::disk('local')->path($combinedRelative));
             $scan->combined_raw_output_path = $combinedRelative;
 
             $this->touchProgress($scan, 92, Scan::PHASE_AI);
+            $scan = $this->refreshScanOrStop();
+            if (! $scan) {
+                return;
+            }
             $scan->ai_summary = $this->buildAiSummary($scan);
             $scan->status = Scan::STATUS_COMPLETED;
             $scan->phase = Scan::PHASE_COMPLETED;
@@ -113,16 +151,32 @@ class RunWaveScanJob implements ShouldQueue
             Log::info('WAVe-Lite: scan completed', ['scan_id' => $scan->id]);
         } catch (\Throwable $e) {
             Log::error('WAVe-Lite: scan job failed', [
-                'scan_id' => $scan->id,
+                'scan_id' => $scan->id ?? $this->scanId,
                 'error' => $e->getMessage(),
             ]);
 
+            $scan = Scan::query()->find($this->scanId);
+            if (! $scan) {
+                return;
+            }
             $scan->status = Scan::STATUS_FAILED;
             $scan->phase = Scan::PHASE_FAILED;
             $scan->error_message = $e->getMessage();
             $scan->completed_at = now();
             $scan->save();
         }
+    }
+
+    private function refreshScanOrStop(): ?Scan
+    {
+        $scan = Scan::query()->find($this->scanId);
+        if (! $scan) {
+            Log::info('WAVe-Lite: stopping scan job because scan was deleted', [
+                'scan_id' => $this->scanId,
+            ]);
+        }
+
+        return $scan;
     }
 
     private function touchProgress(Scan $scan, int $progress, string $phase): void
@@ -175,6 +229,18 @@ class RunWaveScanJob implements ShouldQueue
     {
         $base = $this->zapLocalBaseUrl();
         $httpTimeout = 120;
+        $maxChildren = (int) config('wave.zap_local.max_children', 12);
+        if ($maxChildren <= 0) {
+            $maxChildren = 12;
+        }
+        $spiderTimeout = (int) config('wave.zap_local.spider_timeout', 240);
+        if ($spiderTimeout <= 0) {
+            $spiderTimeout = 240;
+        }
+        $pscanWait = (int) config('wave.zap_local.pscan_wait', 45);
+        if ($pscanWait <= 0) {
+            $pscanWait = 45;
+        }
 
         $ping = Http::connectTimeout(5)->timeout(10)->get($base.'/JSON/core/view/version/', $this->zapApiQuery());
         if (! $ping->successful()) {
@@ -194,7 +260,7 @@ class RunWaveScanJob implements ShouldQueue
             $this->zapApiQuery([
                 'url' => $targetUrl,
                 'recurse' => 'true',
-                'maxChildren' => '25',
+                'maxChildren' => (string) $maxChildren,
             ])
         );
         if (! $spiderStart->successful()) {
@@ -206,7 +272,7 @@ class RunWaveScanJob implements ShouldQueue
             throw new \RuntimeException('ZAP spider response missing scan id: '.$spiderStart->body());
         }
 
-        $deadline = time() + min($this->timeout - 60, 900);
+        $deadline = time() + min(max(30, $this->timeout - 60), $spiderTimeout);
         while (time() < $deadline) {
             $st = Http::timeout(30)->get(
                 $base.'/JSON/spider/view/status/',
@@ -224,7 +290,7 @@ class RunWaveScanJob implements ShouldQueue
 
         $this->touchProgress($scan, 40, Scan::PHASE_ZAP_SPIDER);
 
-        $pscanDeadline = time() + 120;
+        $pscanDeadline = time() + $pscanWait;
         while (time() < $pscanDeadline) {
             $left = Http::timeout(15)->get($base.'/JSON/pscan/view/recordsToScan/', $this->zapApiQuery());
             if (! $left->successful()) {
@@ -435,12 +501,17 @@ class RunWaveScanJob implements ShouldQueue
         $niktoLine = $scan->nikto_raw_output_path
             ? 'Nikto report: '.$scan->nikto_raw_output_path
             : 'Nikto: not run (disabled, unavailable, or produced no output file).';
+        $nucleiRelative = "scans/{$scan->id}/nuclei-report.jsonl";
+        $nucleiLine = Storage::disk('local')->exists($nucleiRelative)
+            ? 'Nuclei report: '.$nucleiRelative
+            : 'Nuclei: not run (disabled, unavailable, or produced no output file).';
 
         $lines = [
             'WAVe-Lite combined summary',
             'Target: '.$scan->url,
             'ZAP report: '.$scan->zap_raw_output_path,
             $niktoLine,
+            $nucleiLine,
         ];
         file_put_contents($absolutePath, implode("\n", $lines));
     }
@@ -452,23 +523,178 @@ class RunWaveScanJob implements ShouldQueue
             return $geminiSummary;
         }
 
-        return $this->buildHeuristicAiSummary($scan);
+        $groqSummary = $this->buildGroqSummary($scan);
+        if (is_string($groqSummary) && $groqSummary !== '') {
+            return $groqSummary;
+        }
+
+        $failureReason = collect([$this->geminiFailureReason, $this->groqFailureReason])
+            ->filter(fn ($v) => is_string($v) && trim($v) !== '')
+            ->implode(' | ');
+
+        return $this->buildHeuristicAiSummary($scan, $failureReason !== '' ? $failureReason : null);
     }
 
     private function buildGeminiSummary(Scan $scan): ?string
     {
         $apiKey = config('wave.gemini.api_key');
         if (! is_string($apiKey) || $apiKey === '') {
+            $this->geminiFailureReason = 'Gemini API key is not configured.';
             return null;
         }
 
-        $model = config('wave.gemini.model', 'gemini-1.5-flash');
-        $model = is_string($model) && $model !== '' ? $model : 'gemini-1.5-flash';
+        $configuredModel = config('wave.gemini.model', 'gemini-2.5-flash');
+        $configuredModel = is_string($configuredModel) && trim($configuredModel) !== ''
+            ? trim($configuredModel)
+            : 'gemini-2.5-flash';
+        if (str_starts_with($configuredModel, 'models/')) {
+            $configuredModel = substr($configuredModel, 7);
+        }
+        $modelCandidates = array_values(array_unique(array_filter([
+            $configuredModel,
+            'gemini-2.5-flash',
+            'gemini-2.5-pro',
+            'gemini-2.0-flash',
+            'gemini-2.0-flash-lite',
+        ], fn ($m) => is_string($m) && $m !== '')));
         $timeout = (int) config('wave.gemini.timeout', 60);
         if ($timeout <= 0) {
             $timeout = 60;
         }
 
+        $input = $this->buildSummaryInput($scan);
+        $prompt = $this->buildSummaryPrompt($input);
+
+        try {
+            foreach ($modelCandidates as $model) {
+                $url = 'https://generativelanguage.googleapis.com/v1beta/models/'.
+                    rawurlencode($model).
+                    ':generateContent?key='.rawurlencode($apiKey);
+
+                $response = Http::timeout($timeout)->post($url, [
+                    'contents' => [[
+                        'parts' => [[
+                            'text' => $prompt,
+                        ]],
+                    ]],
+                    'generationConfig' => [
+                        'temperature' => 0.2,
+                        'responseMimeType' => 'text/plain',
+                    ],
+                ]);
+
+                if (! $response->successful()) {
+                    $this->geminiFailureReason = 'Gemini request failed (model '.$model.', HTTP '.$response->status().').';
+                    Log::warning('WAVe-Lite: Gemini summary request failed', [
+                        'scan_id' => $scan->id,
+                        'model' => $model,
+                        'status' => $response->status(),
+                        'body' => mb_substr($response->body(), 0, 1000),
+                    ]);
+
+                    continue;
+                }
+
+                $text = (string) data_get($response->json(), 'candidates.0.content.parts.0.text', '');
+                $paragraph = trim($text);
+                if ($paragraph !== '') {
+                    $this->geminiFailureReason = null;
+                    return $paragraph;
+                }
+
+                $this->geminiFailureReason = 'Gemini returned an empty response (model '.$model.').';
+                Log::warning('WAVe-Lite: Gemini response was empty', [
+                    'scan_id' => $scan->id,
+                    'model' => $model,
+                ]);
+            }
+
+            return null;
+        } catch (\Throwable $e) {
+            Log::warning('WAVe-Lite: Gemini summary request exception', [
+                'scan_id' => $scan->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->geminiFailureReason = 'Gemini request exception: '.$e->getMessage();
+
+            return null;
+        }
+    }
+
+    private function buildGroqSummary(Scan $scan): ?string
+    {
+        $apiKey = config('wave.groq.api_key');
+        if (! is_string($apiKey) || trim($apiKey) === '') {
+            $this->groqFailureReason = 'Groq API key is not configured.';
+
+            return null;
+        }
+
+        $model = config('wave.groq.model', 'llama-3.3-70b-versatile');
+        $model = is_string($model) && trim($model) !== '' ? trim($model) : 'llama-3.3-70b-versatile';
+        $timeout = (int) config('wave.groq.timeout', 60);
+        if ($timeout <= 0) {
+            $timeout = 60;
+        }
+
+        $input = $this->buildSummaryInput($scan);
+        $prompt = $this->buildSummaryPrompt($input);
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->timeout($timeout)
+                ->post('https://api.groq.com/openai/v1/chat/completions', [
+                    'model' => $model,
+                    'messages' => [[
+                        'role' => 'user',
+                        'content' => $prompt,
+                    ]],
+                    'temperature' => 0.2,
+                ]);
+
+            if (! $response->successful()) {
+                $this->groqFailureReason = 'Groq request failed (model '.$model.', HTTP '.$response->status().').';
+                Log::warning('WAVe-Lite: Groq summary request failed', [
+                    'scan_id' => $scan->id,
+                    'model' => $model,
+                    'status' => $response->status(),
+                    'body' => mb_substr($response->body(), 0, 1000),
+                ]);
+
+                return null;
+            }
+
+            $text = (string) data_get($response->json(), 'choices.0.message.content', '');
+            $summary = trim($text);
+            if ($summary === '') {
+                $this->groqFailureReason = 'Groq returned an empty response (model '.$model.').';
+                Log::warning('WAVe-Lite: Groq response was empty', [
+                    'scan_id' => $scan->id,
+                    'model' => $model,
+                ]);
+
+                return null;
+            }
+
+            $this->groqFailureReason = null;
+
+            return $summary;
+        } catch (\Throwable $e) {
+            Log::warning('WAVe-Lite: Groq summary request exception', [
+                'scan_id' => $scan->id,
+                'error' => $e->getMessage(),
+            ]);
+            $this->groqFailureReason = 'Groq request exception: '.$e->getMessage();
+
+            return null;
+        }
+    }
+
+    /**
+     * @return array{target_url: string, zap_findings: array<int, array<string, mixed>>, nikto_findings: array<int, array<string, mixed>>, nuclei_findings: array<int, array<string, mixed>>}
+     */
+    private function buildSummaryInput(Scan $scan): array
+    {
         $zapFindings = ScanFinding::query()
             ->where('scan_id', $scan->id)
             ->where('source', ScanFinding::SOURCE_ZAP)
@@ -485,92 +711,105 @@ class RunWaveScanJob implements ShouldQueue
             ->get(['title', 'severity', 'normalized_severity', 'endpoint', 'description'])
             ->toArray();
 
-        $input = [
+        $nucleiFindings = ScanFinding::query()
+            ->where('scan_id', $scan->id)
+            ->where('source', ScanFinding::SOURCE_NUCLEI)
+            ->orderByDesc('id')
+            ->limit(40)
+            ->get(['title', 'severity', 'normalized_severity', 'endpoint', 'description'])
+            ->toArray();
+
+        return [
             'target_url' => $scan->url,
             'zap_findings' => $zapFindings,
             'nikto_findings' => $niktoFindings,
+            'nuclei_findings' => $nucleiFindings,
         ];
-
-        $prompt = "You are a security analyst assistant writing for non-technical readers.\n".
-            "Write exactly one plain-language paragraph (500-1000 words, simple readability) summarizing the combined ZAP and Nikto findings.\n".
-            "Avoid heavy security jargon. If a technical term is necessary, explain it in simple words.\n".
-            "Cover: overall risk level, the main weaknesses, and the single most important fix to do first.\n".
-            "Do not invent findings. Use only provided input.\n".
-            "Return plain text paragraph only (no JSON, no bullets, no markdown, no headings).\n".
-            "Input JSON:\n".json_encode($input, JSON_UNESCAPED_SLASHES);
-
-        try {
-            $url = 'https://generativelanguage.googleapis.com/v1beta/models/'.
-                rawurlencode($model).
-                ':generateContent?key='.rawurlencode($apiKey);
-
-            $response = Http::timeout($timeout)->post($url, [
-                'contents' => [[
-                    'parts' => [[
-                        'text' => $prompt,
-                    ]],
-                ]],
-                'generationConfig' => [
-                    'temperature' => 0.2,
-                    'responseMimeType' => 'text/plain',
-                ],
-            ]);
-
-            if (! $response->successful()) {
-                Log::warning('WAVe-Lite: Gemini summary request failed', [
-                    'scan_id' => $scan->id,
-                    'status' => $response->status(),
-                    'body' => mb_substr($response->body(), 0, 1000),
-                ]);
-
-                return null;
-            }
-
-            $text = (string) data_get($response->json(), 'candidates.0.content.parts.0.text', '');
-            if ($text === '') {
-                return null;
-            }
-
-            $paragraph = trim($text);
-            if ($paragraph === '') {
-                return null;
-            }
-
-            return $paragraph;
-        } catch (\Throwable $e) {
-            Log::warning('WAVe-Lite: Gemini summary request exception', [
-                'scan_id' => $scan->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            return null;
-        }
     }
 
-    private function buildHeuristicAiSummary(Scan $scan): string
+    /**
+     * @param  array{target_url: string, zap_findings: array<int, array<string, mixed>>, nikto_findings: array<int, array<string, mixed>>, nuclei_findings: array<int, array<string, mixed>>}  $input
+     */
+    private function buildSummaryPrompt(array $input): string
+    {
+        return "You are a security analyst assistant writing for business and technical stakeholders.\n".
+            "Write a detailed executive summary of 700-1200 words in plain text.\n".
+            "Use 4-6 short paragraphs, not bullet points, and keep language clear but not overly simplified.\n".
+            "Explain: (1) overall risk posture, (2) most important weaknesses found, (3) why they matter in real-world attack scenarios,\n".
+            "(4) affected endpoints/assets, and (5) a prioritized remediation plan with immediate, short-term, and medium-term actions.\n".
+            "If technical terms are used, briefly explain them in context.\n".
+            "Do not invent findings or endpoints. Use only provided input and be explicit about uncertainty when data is limited.\n".
+            "Return plain text only (no JSON, no bullets, no markdown, no headings).\n".
+            "Input JSON:\n".json_encode($input, JSON_UNESCAPED_SLASHES);
+    }
+
+    private function buildHeuristicAiSummary(Scan $scan, ?string $geminiFailureReason = null): string
     {
         $scan->loadCount('findings');
-        $bySeverity = ScanFinding::query()
+
+        $severityCounts = ScanFinding::query()
             ->where('scan_id', $scan->id)
-            ->where('source', ScanFinding::SOURCE_ZAP)
-            ->selectRaw('severity, count(*) as c')
-            ->groupBy('severity')
-            ->pluck('c', 'severity')
+            ->selectRaw("LOWER(COALESCE(NULLIF(normalized_severity, ''), severity, 'info')) as sev, COUNT(*) as c")
+            ->groupBy('sev')
+            ->pluck('c', 'sev')
             ->all();
 
+        $critical = (int) ($severityCounts['critical'] ?? 0);
+        $high = (int) ($severityCounts['high'] ?? 0);
+        $medium = (int) ($severityCounts['medium'] ?? 0);
+        $low = (int) ($severityCounts['low'] ?? 0);
+        $info = (int) ($severityCounts['info'] ?? 0);
+
+        $zapCount = ScanFinding::query()
+            ->where('scan_id', $scan->id)
+            ->where('source', ScanFinding::SOURCE_ZAP)
+            ->count();
         $niktoCount = ScanFinding::query()
             ->where('scan_id', $scan->id)
             ->where('source', ScanFinding::SOURCE_NIKTO)
             ->count();
+        $nucleiCount = ScanFinding::query()
+            ->where('scan_id', $scan->id)
+            ->where('source', ScanFinding::SOURCE_NUCLEI)
+            ->count();
 
-        $high = (int) ($bySeverity['High'] ?? 0);
-        $medium = (int) ($bySeverity['Medium'] ?? 0);
-        $low = (int) ($bySeverity['Low'] ?? 0);
-        $info = (int) ($bySeverity['Informational'] ?? 0);
+        $topFindings = ScanFinding::query()
+            ->where('scan_id', $scan->id)
+            ->selectRaw('title, COUNT(*) as total')
+            ->groupBy('title')
+            ->orderByDesc('total')
+            ->limit(3)
+            ->get()
+            ->map(fn (ScanFinding $f) => $f->title.' ('.$f->total.')')
+            ->values()
+            ->all();
 
-        return 'Automated scan finished with '.$scan->findings_count.' total findings, including '.$niktoCount.' from Nikto. '.
-            'The biggest risk comes from '.$high.' high-risk and '.$medium.' medium-risk issues, while '.$low.' low-risk and '.$info.' informational items are lower priority. '.
-            'Start by fixing the high-risk and medium-risk issues first, then run the scan again to make sure the fixes worked.';
+        $topText = $topFindings !== []
+            ? implode('; ', $topFindings)
+            : 'No dominant repeated pattern was detected in this run.';
+
+        $riskLabel = 'low';
+        if ($critical > 0 || $high > 0) {
+            $riskLabel = 'high';
+        } elseif ($medium >= 15) {
+            $riskLabel = 'moderate';
+        }
+
+        $summary = 'Automated scan completed for '.$scan->url.' with '.$scan->findings_count.' total findings. '.
+            'Source coverage: ZAP='.$zapCount.', Nikto='.$niktoCount.', Nuclei='.$nucleiCount.'. '.
+            'Current risk posture is '.$riskLabel.' based on severity distribution: critical='.$critical.', high='.$high.', medium='.$medium.', low='.$low.', informational='.$info.'. ';
+
+        $summary .= 'The most repeated weaknesses in this scan are: '.$topText.'. ';
+
+        $summary .= 'Immediate actions: first remediate all critical and high findings, then address medium findings that expose authentication, session, header, or input-validation weaknesses. '.
+            'Short-term actions: harden exposed endpoints, enforce secure headers, restrict unnecessary services/routes, and retest affected URLs after each fix batch. '.
+            'Verification actions: rerun the scan, compare deltas against this report, and confirm that high-impact findings do not reappear.';
+
+        if (is_string($geminiFailureReason) && trim($geminiFailureReason) !== '') {
+            $summary .= ' Note: Gemini narrative generation is unavailable right now ('.$geminiFailureReason.').';
+        }
+
+        return $summary;
     }
 
     private function runNiktoIfConfigured(Scan $scan, string $prefix): void
@@ -589,9 +828,17 @@ class RunWaveScanJob implements ShouldQueue
         $niktoAltRelative = "{$prefix}/nikto-report.txt.txt";
         $niktoAltAbs = Storage::disk('local')->path($niktoAltRelative);
         $maxtime = config('wave.nikto.maxtime', '10m');
-        $maxtime = is_string($maxtime) && $maxtime !== '' ? $maxtime : '10m';
+        $maxtime = is_string($maxtime) && $maxtime !== '' ? $maxtime : '4m';
+        $defaultTimeout = $this->parseDurationToSeconds($maxtime) + 60;
+        $processTimeout = (int) config('wave.nikto.process_timeout', $defaultTimeout);
+        if ($processTimeout <= 0) {
+            $processTimeout = $defaultTimeout;
+        }
+        if ($processTimeout < 60) {
+            $processTimeout = 60;
+        }
 
-        $result = Process::timeout(900)->run([
+        $result = Process::timeout($processTimeout)->run([
             $binary,
             '-host', $scan->url,
             '-nointeractive',
@@ -633,6 +880,144 @@ class RunWaveScanJob implements ShouldQueue
                 'exit' => $result->exitCode(),
             ]);
         }
+    }
+
+    private function runNucleiIfConfigured(Scan $scan, string $prefix): void
+    {
+        if (config('wave.scan_simulate', false) || ! config('wave.nuclei.enabled', false)) {
+            return;
+        }
+
+        $binary = config('wave.nuclei.binary', 'nuclei');
+        if (! is_string($binary) || trim($binary) === '') {
+            return;
+        }
+
+        $nucleiRelative = "{$prefix}/nuclei-report.jsonl";
+        $nucleiAbs = Storage::disk('local')->path($nucleiRelative);
+
+        $timeout = (int) config('wave.nuclei.timeout', 240);
+        if ($timeout <= 0) {
+            $timeout = 240;
+        }
+
+        $command = [
+            $binary,
+            '-u', $scan->url,
+            '-jsonl',
+            '-silent',
+            '-o', $nucleiAbs,
+        ];
+
+        $severity = config('wave.nuclei.severity');
+        if (is_string($severity) && trim($severity) !== '') {
+            $command[] = '-severity';
+            $command[] = trim($severity);
+        }
+
+        $templates = config('wave.nuclei.templates');
+        if (is_string($templates) && trim($templates) !== '') {
+            $command[] = '-t';
+            $command[] = trim($templates);
+        }
+
+        $result = Process::timeout($timeout)->run($command);
+        if (! is_file($nucleiAbs)) {
+            Log::warning('WAVe-Lite: Nuclei did not write an output file', [
+                'scan_id' => $scan->id,
+                'exit' => $result->exitCode(),
+                'output' => substr($result->output().$result->errorOutput(), 0, 2000),
+            ]);
+
+            return;
+        }
+
+        ScanFinding::query()->where('scan_id', $scan->id)->where('source', ScanFinding::SOURCE_NUCLEI)->delete();
+        $this->ingestNucleiReport($scan, $nucleiAbs);
+
+        if ($result->failed()) {
+            Log::info('WAVe-Lite: Nuclei process exited non-zero', [
+                'scan_id' => $scan->id,
+                'exit' => $result->exitCode(),
+            ]);
+        }
+    }
+
+    private function parseDurationToSeconds(string $duration): int
+    {
+        $value = trim(strtolower($duration));
+        if ($value === '') {
+            return 240;
+        }
+
+        if (is_numeric($value)) {
+            return max(1, (int) $value);
+        }
+
+        if (preg_match('/^(\d+)\s*([smh])$/', $value, $m) === 1) {
+            $n = (int) $m[1];
+            return match ($m[2]) {
+                'h' => $n * 3600,
+                'm' => $n * 60,
+                default => $n,
+            };
+        }
+
+        return 240;
+    }
+
+    private function ingestNucleiReport(Scan $scan, string $jsonlPath): void
+    {
+        $raw = @file_get_contents($jsonlPath);
+        if ($raw === false || trim($raw) === '') {
+            return;
+        }
+
+        $inserted = 0;
+        foreach (preg_split("/(\r\n|\n|\r)/", $raw) as $line) {
+            $line = trim((string) $line);
+            if ($line === '') {
+                continue;
+            }
+            $row = json_decode($line, true);
+            if (! is_array($row)) {
+                continue;
+            }
+
+            $info = is_array($row['info'] ?? null) ? $row['info'] : [];
+            $severity = (string) ($info['severity'] ?? 'info');
+            $title = (string) ($info['name'] ?? $row['template-id'] ?? 'Nuclei finding');
+            $description = (string) ($info['description'] ?? '');
+            $endpoint = (string) ($row['matched-at'] ?? $row['host'] ?? $scan->url);
+            $evidence = (string) ($row['matcher-name'] ?? $row['type'] ?? '');
+            $references = $info['reference'] ?? null;
+
+            ScanFinding::query()->create([
+                'scan_id' => $scan->id,
+                'source' => ScanFinding::SOURCE_NUCLEI,
+                'tool_rule_id' => isset($row['template-id']) ? (string) $row['template-id'] : null,
+                'title' => mb_substr($title !== '' ? $title : 'Nuclei finding', 0, 512),
+                'severity' => mb_substr($severity, 0, 32),
+                'confidence' => null,
+                'normalized_severity' => $this->mapNiktoSeverity($severity),
+                'description' => $description !== '' ? $description : null,
+                'evidence' => $evidence !== '' ? $evidence : null,
+                'remediation' => null,
+                'endpoint' => $endpoint !== '' ? mb_substr($endpoint, 0, 2048) : $scan->url,
+                'raw_metadata' => [
+                    'references' => is_array($references) ? $references : null,
+                    'tags' => $info['tags'] ?? null,
+                    'raw' => $row,
+                ],
+            ]);
+            $inserted++;
+        }
+
+        Log::info('WAVe-Lite: Nuclei findings ingested', [
+            'scan_id' => $scan->id,
+            'count' => $inserted,
+            'path' => $jsonlPath,
+        ]);
     }
 
     private function ingestNiktoReport(Scan $scan, string $textPath): void

@@ -201,6 +201,7 @@ class ScanController extends Controller
         $enabledTools = [
             'zap' => (bool) (config('wave.zap_local.host') && config('wave.zap_local.port')),
             'nikto' => (bool) config('wave.nikto.enabled', true),
+            'nuclei' => (bool) config('wave.nuclei.enabled', false),
             'gemini' => (bool) config('wave.gemini.api_key'),
         ];
 
@@ -213,6 +214,7 @@ class ScanController extends Controller
             ->withCount([
                 'findings as zap_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_ZAP),
                 'findings as nikto_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_NIKTO),
+                'findings as nuclei_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_NUCLEI),
             ])
             ->orderByDesc('created_at')
             ->limit(50)
@@ -400,6 +402,7 @@ class ScanController extends Controller
     {
         $this->ensureCanViewScan($request->user(), $scan);
 
+        $this->cancelQueuedJobsForScan($scan->id);
         $this->deleteScanArtifacts($scan);
         $scan->delete();
 
@@ -412,6 +415,7 @@ class ScanController extends Controller
         $scans = Scan::query()->visibleToUser($user)->get();
 
         foreach ($scans as $scan) {
+            $this->cancelQueuedJobsForScan($scan->id);
             $this->deleteScanArtifacts($scan);
             $scan->delete();
         }
@@ -423,15 +427,87 @@ class ScanController extends Controller
     {
         $this->ensureCanViewScan($request->user(), $scan);
 
+        $queuePosition = null;
+        if (in_array($scan->status, [Scan::STATUS_QUEUED, Scan::STATUS_RUNNING], true)) {
+            $queuedScanIds = DB::table('jobs')
+                ->orderBy('id')
+                ->pluck('payload')
+                ->map(function (string $payload): ?int {
+                    return $this->extractScanIdFromQueuePayload($payload);
+                })
+                ->filter()
+                ->values();
+
+            $index = $queuedScanIds->search(fn (int $id) => $id === (int) $scan->id);
+            if (is_int($index)) {
+                $queuePosition = $index + 1;
+            }
+        }
+
+        $queueNotice = null;
+        if ($scan->status === Scan::STATUS_QUEUED && $queuePosition !== null) {
+            $queueNotice = 'Waiting in queue (position '.$queuePosition.').';
+        } elseif (
+            $scan->status === Scan::STATUS_RUNNING
+            && (int) $scan->progress <= 5
+            && strcasecmp((string) $scan->phase, Scan::PHASE_STARTING) === 0
+            && $queuePosition !== null
+        ) {
+            $queueNotice = 'Worker is preparing this scan (position '.$queuePosition.').';
+        }
+
         return response()->json([
             'id' => $scan->id,
             'status' => $scan->status,
             'progress' => $scan->progress,
             'phase' => $scan->phase,
+            'queue_position' => $queuePosition,
+            'queue_notice' => $queueNotice,
             'url' => $scan->url,
             'completed_at' => $scan->completed_at?->toIso8601String(),
             'error_message' => $scan->error_message,
         ]);
+    }
+
+    private function extractScanIdFromQueuePayload(string $payload): ?int
+    {
+        $decoded = json_decode($payload, true);
+        if (! is_array($decoded)) {
+            return null;
+        }
+
+        $command = data_get($decoded, 'data.command');
+        if (! is_string($command) || $command === '') {
+            return null;
+        }
+
+        if (preg_match('/scanId";i:(\d+)/', $command, $m) !== 1) {
+            return null;
+        }
+
+        return isset($m[1]) ? (int) $m[1] : null;
+    }
+
+    private function cancelQueuedJobsForScan(int $scanId): void
+    {
+        $jobs = DB::table('jobs')->select('id', 'payload')->get();
+        $jobIdsToDelete = [];
+
+        foreach ($jobs as $job) {
+            $payload = (string) ($job->payload ?? '');
+            if ($payload === '') {
+                continue;
+            }
+
+            $queuedScanId = $this->extractScanIdFromQueuePayload($payload);
+            if ($queuedScanId === $scanId) {
+                $jobIdsToDelete[] = (int) $job->id;
+            }
+        }
+
+        if ($jobIdsToDelete !== []) {
+            DB::table('jobs')->whereIn('id', $jobIdsToDelete)->delete();
+        }
     }
 
     /**

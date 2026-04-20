@@ -2,7 +2,30 @@
 @php
     $zapFindings = $scan->findings->where('source', \App\Models\ScanFinding::SOURCE_ZAP);
     $niktoFindings = $scan->findings->where('source', \App\Models\ScanFinding::SOURCE_NIKTO);
+    $nucleiFindings = $scan->findings->where('source', \App\Models\ScanFinding::SOURCE_NUCLEI);
     $totalFindings = $scan->findings->count();
+    $phaseText = strtolower((string) $scan->phase);
+    $isTerminal = in_array($scan->status, [\App\Models\Scan::STATUS_COMPLETED, \App\Models\Scan::STATUS_FAILED], true);
+    $stepState = function (string $step) use ($phaseText, $isTerminal) {
+        if ($isTerminal) {
+            return 'done';
+        }
+
+        return match ($step) {
+            'zap' => str_contains($phaseText, 'zap') ? 'running' : (str_contains($phaseText, 'nikto') || str_contains($phaseText, 'nuclei') || str_contains($phaseText, 'ai') || str_contains($phaseText, 'completed') ? 'done' : 'pending'),
+            'nikto' => str_contains($phaseText, 'nikto') ? 'running' : (str_contains($phaseText, 'nuclei') || str_contains($phaseText, 'ai') || str_contains($phaseText, 'completed') ? 'done' : 'pending'),
+            'nuclei' => str_contains($phaseText, 'nuclei') ? 'running' : (str_contains($phaseText, 'ai') || str_contains($phaseText, 'completed') ? 'done' : 'pending'),
+            'ai' => str_contains($phaseText, 'ai') ? 'running' : (str_contains($phaseText, 'completed') ? 'done' : 'pending'),
+            default => 'pending',
+        };
+    };
+    $stepClass = function (string $state) {
+        return match ($state) {
+            'running' => 'bg-blue-100 text-blue-800 border-blue-200',
+            'done' => 'bg-green-100 text-green-800 border-green-200',
+            default => 'bg-gray-100 text-gray-600 border-gray-200',
+        };
+    };
 @endphp
 
 <x-app-layout>
@@ -39,9 +62,22 @@
                         <dt class="text-gray-500 mb-1">{{ __('Progress') }}</dt>
                         <dd>
                             <div class="h-2 w-full max-w-md overflow-hidden rounded-full bg-gray-200">
-                                <div class="h-full rounded-full bg-indigo-600" style="width: {{ (int) $scan->progress }}%"></div>
+                                <div data-report-progress-bar class="h-full rounded-full bg-indigo-600 transition-all duration-300" style="width: {{ (int) $scan->progress }}%"></div>
                             </div>
-                            <span class="text-xs text-gray-500 mt-1 inline-block">{{ (int) $scan->progress }}%</span>
+                            <span data-report-progress-label class="text-xs text-gray-500 mt-1 inline-block">{{ (int) $scan->progress }}%</span>
+                            <p data-report-phase-text class="mt-1 text-xs text-indigo-700">
+                                {{ __('Current action:') }} <span class="font-medium">{{ $scan->phase }}</span>
+                            </p>
+                            <div class="mt-2 flex flex-wrap gap-1.5 text-[11px]" data-report-step-pills>
+                                @php $zapState = $stepState('zap'); @endphp
+                                <span data-report-step="zap" data-report-state="{{ $zapState }}" class="inline-flex rounded-full border px-2 py-0.5 {{ $stepClass($zapState) }}">ZAP</span>
+                                @php $niktoState = $stepState('nikto'); @endphp
+                                <span data-report-step="nikto" data-report-state="{{ $niktoState }}" class="inline-flex rounded-full border px-2 py-0.5 {{ $stepClass($niktoState) }}">Nikto</span>
+                                @php $nucleiState = $stepState('nuclei'); @endphp
+                                <span data-report-step="nuclei" data-report-state="{{ $nucleiState }}" class="inline-flex rounded-full border px-2 py-0.5 {{ $stepClass($nucleiState) }}">Nuclei</span>
+                                @php $aiState = $stepState('ai'); @endphp
+                                <span data-report-step="ai" data-report-state="{{ $aiState }}" class="inline-flex rounded-full border px-2 py-0.5 {{ $stepClass($aiState) }}">AI</span>
+                            </div>
                         </dd>
                     </div>
                     @if ($scan->error_message)
@@ -52,7 +88,7 @@
                 </dl>
             </div>
 
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-4">
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-5">
                 <div class="rounded-lg border border-gray-200 bg-white p-4">
                     <p class="text-xs uppercase tracking-wide text-gray-500">{{ __('Total findings') }}</p>
                     <p class="mt-1 text-2xl font-semibold text-gray-900">{{ $totalFindings }}</p>
@@ -64,6 +100,10 @@
                 <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
                     <p class="text-xs uppercase tracking-wide text-amber-700">{{ __('Nikto findings') }}</p>
                     <p class="mt-1 text-2xl font-semibold text-amber-900">{{ $niktoFindings->count() }}</p>
+                </div>
+                <div class="rounded-lg border border-violet-200 bg-violet-50 p-4">
+                    <p class="text-xs uppercase tracking-wide text-violet-700">{{ __('Nuclei findings') }}</p>
+                    <p class="mt-1 text-2xl font-semibold text-violet-900">{{ $nucleiFindings->count() }}</p>
                 </div>
                 <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
                     <p class="text-xs uppercase tracking-wide text-emerald-700">{{ __('Scan duration') }}</p>
@@ -152,8 +192,80 @@
             @if (! $canViewTechnical || $viewMode === 'executive')
                 @include('scans.partials.report-executive', ['scan' => $scan, 'aiDecoded' => $aiDecoded, 'aiSummaryText' => $aiSummaryText])
             @else
-                @include('scans.partials.report-technical', ['scan' => $scan, 'zapFindings' => $zapFindings, 'niktoFindings' => $niktoFindings, 'aiDecoded' => $aiDecoded, 'aiSummaryText' => $aiSummaryText])
+                @include('scans.partials.report-technical', ['scan' => $scan, 'zapFindings' => $zapFindings, 'niktoFindings' => $niktoFindings, 'nucleiFindings' => $nucleiFindings, 'aiDecoded' => $aiDecoded, 'aiSummaryText' => $aiSummaryText])
             @endif
         </div>
     </div>
 </x-app-layout>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const row = document.querySelector('[data-report-progress-bar]');
+    if (!row) {
+        return;
+    }
+
+    const bar = document.querySelector('[data-report-progress-bar]');
+    const label = document.querySelector('[data-report-progress-label]');
+    const phaseText = document.querySelector('[data-report-phase-text]');
+    const pills = Array.from(document.querySelectorAll('[data-report-step]'));
+    const pollUrl = @json(route('scans.progress', $scan));
+
+    const classByState = {
+        running: ['bg-blue-100', 'text-blue-800', 'border-blue-200'],
+        done: ['bg-green-100', 'text-green-800', 'border-green-200'],
+        pending: ['bg-gray-100', 'text-gray-600', 'border-gray-200'],
+    };
+
+    const determineStepState = (step, phase, status) => {
+        if (status === 'completed' || status === 'failed') return 'done';
+        const p = String(phase || '').toLowerCase();
+        if (step === 'zap') return p.includes('zap') ? 'running' : (p.includes('nikto') || p.includes('nuclei') || p.includes('ai') || p.includes('completed') ? 'done' : 'pending');
+        if (step === 'nikto') return p.includes('nikto') ? 'running' : (p.includes('nuclei') || p.includes('ai') || p.includes('completed') ? 'done' : 'pending');
+        if (step === 'nuclei') return p.includes('nuclei') ? 'running' : (p.includes('ai') || p.includes('completed') ? 'done' : 'pending');
+        if (step === 'ai') return p.includes('ai') ? 'running' : (p.includes('completed') ? 'done' : 'pending');
+        return 'pending';
+    };
+
+    const setPillState = (el, nextState) => {
+        Object.values(classByState).flat().forEach((c) => el.classList.remove(c));
+        (classByState[nextState] || classByState.pending).forEach((c) => el.classList.add(c));
+        el.setAttribute('data-report-state', nextState);
+    };
+
+    const applyPayload = (data) => {
+        if (bar) {
+            bar.style.width = `${Number(data.progress) || 0}%`;
+        }
+        if (label) {
+            label.textContent = `${Number(data.progress) || 0}%`;
+        }
+        if (phaseText) {
+            phaseText.innerHTML = `Current action: <span class="font-medium">${data.phase ?? '—'}</span>`;
+        }
+        pills.forEach((pill) => {
+            const step = pill.getAttribute('data-report-step');
+            const st = determineStepState(step, data.phase, data.status);
+            setPillState(pill, st);
+        });
+    };
+
+    const poll = async () => {
+        try {
+            const res = await fetch(pollUrl, {
+                credentials: 'same-origin',
+                headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            if (!res.ok) return;
+            const data = await res.json();
+            applyPayload(data);
+            if (data.status === 'completed' || data.status === 'failed') return;
+            setTimeout(poll, 3000);
+        } catch (_) {
+            setTimeout(poll, 4000);
+        }
+    };
+
+    poll();
+});
+</script>

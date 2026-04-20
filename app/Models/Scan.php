@@ -25,6 +25,8 @@ class Scan extends Model
 
     public const PHASE_NIKTO = 'Nikto Scan';
 
+    public const PHASE_NUCLEI = 'Nuclei Scan';
+
     public const PHASE_AI = 'AI Analysis';
 
     public const PHASE_COMPLETED = 'Completed';

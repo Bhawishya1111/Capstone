@@ -11,6 +11,8 @@ class ScanFinding extends Model
 
     public const SOURCE_NIKTO = 'nikto';
 
+    public const SOURCE_NUCLEI = 'nuclei';
+
     protected $fillable = [
         'scan_id',
         'source',

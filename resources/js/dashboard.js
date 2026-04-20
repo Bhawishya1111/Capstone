@@ -7,6 +7,7 @@ function updateRowFromPayload(row, data) {
     const bar = row.querySelector('[data-scan-progress-bar]');
     const phaseEl = row.querySelector('[data-scan-phase]');
     const statusEl = row.querySelector('[data-scan-status-badge]');
+    const queueHintEl = row.querySelector('[data-scan-queue-hint]');
 
     if (bar) {
         bar.style.width = `${Number(data.progress) || 0}%`;
@@ -35,6 +36,10 @@ function updateRowFromPayload(row, data) {
         } else {
             statusEl.classList.add('bg-gray-100', 'text-gray-800');
         }
+    }
+
+    if (queueHintEl) {
+        queueHintEl.textContent = data.queue_notice ?? '';
     }
 
     const terminal = data.status === 'completed' || data.status === 'failed';
@@ -84,18 +89,20 @@ function initScanPolling() {
 function initRiskChart() {
     const pie = document.querySelector('[data-risk-pie]');
     const bars = document.querySelector('[data-risk-bars]');
+    const ai = document.querySelector('[data-risk-ai]');
     const hover = document.querySelector('[data-risk-hover]');
     const toggles = document.querySelectorAll('[data-risk-toggle]');
     const items = document.querySelectorAll('[data-risk-item]');
 
-    if (!pie || !bars || !hover || toggles.length === 0 || items.length === 0) {
+    if (!pie || !bars || !ai || !hover || toggles.length === 0 || items.length === 0) {
         return;
     }
 
     const setMode = (mode) => {
-        const pieMode = mode === 'pie';
-        pie.classList.toggle('hidden', !pieMode);
-        bars.classList.toggle('hidden', pieMode);
+        pie.classList.toggle('hidden', mode !== 'pie');
+        bars.classList.toggle('hidden', mode !== 'bar');
+        ai.classList.toggle('hidden', mode !== 'ai');
+        hover.classList.toggle('hidden', mode === 'ai');
 
         toggles.forEach((btn) => {
             const selected = btn.getAttribute('data-risk-toggle') === mode;
@@ -129,7 +136,24 @@ function initRiskChart() {
     setMode('pie');
 }
 
+function initDashboardAiInsightToggle() {
+    const btn = document.querySelector('[data-dashboard-ai-toggle]');
+    const full = document.querySelector('[data-dashboard-ai-full]');
+
+    if (!btn || !full) {
+        return;
+    }
+
+    btn.addEventListener('click', () => {
+        const expanded = btn.getAttribute('data-dashboard-ai-expanded') === '1';
+        full.classList.toggle('hidden', expanded);
+        btn.setAttribute('data-dashboard-ai-expanded', expanded ? '0' : '1');
+        btn.textContent = expanded ? 'Show more' : 'Show less';
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     initScanPolling();
     initRiskChart();
+    initDashboardAiInsightToggle();
 });

@@ -320,6 +320,13 @@
                         >
                             {{ __('Bar') }}
                         </button>
+                        <button
+                            type="button"
+                            data-risk-toggle="ai"
+                            class="rounded-md px-2.5 py-1 font-medium text-gray-600 hover:text-gray-800"
+                        >
+                            {{ __('AI') }}
+                        </button>
                     </div>
                     <div class="mt-4 flex flex-col items-center gap-4">
                         <div
@@ -354,6 +361,28 @@
                                 </div>
                             @endforeach
                         </div>
+                        <div data-risk-ai class="hidden w-full space-y-2">
+                            @php
+                                $dominant = collect([
+                                    'critical' => (int) ($riskSummary['critical'] ?? 0),
+                                    'high' => (int) ($riskSummary['high'] ?? 0),
+                                    'medium' => (int) ($riskSummary['medium'] ?? 0),
+                                    'low' => (int) ($riskSummary['low'] ?? 0),
+                                    'info' => (int) ($riskSummary['info'] ?? 0),
+                                ])->sortDesc();
+                                $dominantLabel = ucfirst((string) ($dominant->keys()->first() ?? 'info'));
+                                $dominantCount = (int) ($dominant->first() ?? 0);
+                                $riskSummaryNarrative = 'AI chart insight: The current distribution is led by '.$dominantLabel.' findings ('.$dominantCount.'). Prioritize reducing critical and high items first, then re-scan to validate risk reduction.';
+                            @endphp
+                            <p class="rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-xs text-indigo-950 whitespace-pre-wrap">
+                                {{ $riskSummaryNarrative }}
+                            </p>
+                            @if (! empty($dashboardAiInsight))
+                                <p class="rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-700 whitespace-pre-wrap">
+                                    {{ \Illuminate\Support\Str::limit((string) $dashboardAiInsight, 320) }}
+                                </p>
+                            @endif
+                        </div>
                         <div class="grid w-full grid-cols-2 gap-2 text-xs">
                             <button type="button" data-risk-item="critical" data-risk-label="{{ __('Critical') }}" data-risk-count="{{ $riskSummary['critical'] }}" data-risk-total="{{ $totalRisk }}" class="flex items-center gap-2 text-left"><span class="h-2.5 w-2.5 rounded-full bg-red-500"></span><span>{{ __('Critical') }}: {{ $riskSummary['critical'] }}</span></button>
                             <button type="button" data-risk-item="high" data-risk-label="{{ __('High') }}" data-risk-count="{{ $riskSummary['high'] }}" data-risk-total="{{ $totalRisk }}" class="flex items-center gap-2 text-left"><span class="h-2.5 w-2.5 rounded-full bg-orange-400"></span><span>{{ __('High') }}: {{ $riskSummary['high'] }}</span></button>
@@ -379,7 +408,22 @@
                         @endif
                     </div>
                     @if (! empty($dashboardAiInsight))
-                        <p class="mt-3 rounded-md border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-950 whitespace-pre-wrap">{{ $dashboardAiInsight }}</p>
+                        @php
+                            $aiPreview = \Illuminate\Support\Str::limit((string) $dashboardAiInsight, 520);
+                            $aiHasMore = \Illuminate\Support\Str::length((string) $dashboardAiInsight) > \Illuminate\Support\Str::length($aiPreview);
+                        @endphp
+                        <p class="mt-3 rounded-md border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-950 whitespace-pre-wrap">{{ $aiPreview }}</p>
+                        @if ($aiHasMore)
+                            <button
+                                type="button"
+                                class="mt-2 text-sm font-medium text-indigo-700 hover:text-indigo-900"
+                                data-dashboard-ai-toggle
+                                data-dashboard-ai-expanded="0"
+                            >
+                                {{ __('Show more') }}
+                            </button>
+                            <p data-dashboard-ai-full class="mt-3 hidden rounded-md border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-950 whitespace-pre-wrap">{{ $dashboardAiInsight }}</p>
+                        @endif
                         @if ($latestAiScan?->completed_at)
                             <p class="mt-2 text-xs text-gray-500">
                                 {{ __('Generated for') }} {{ $latestAiScan->url }} · {{ $latestAiScan->completed_at->diffForHumans() }}
@@ -517,7 +561,8 @@
 
                                         return match ($step) {
                                             'zap' => str_contains($phase, 'zap') ? 'running' : (str_contains($phase, 'nikto') || str_contains($phase, 'ai') || str_contains($phase, 'completed') ? 'done' : 'pending'),
-                                            'nikto' => str_contains($phase, 'nikto') ? 'running' : (str_contains($phase, 'ai') || str_contains($phase, 'completed') ? 'done' : 'pending'),
+                                            'nikto' => str_contains($phase, 'nikto') ? 'running' : (str_contains($phase, 'nuclei') || str_contains($phase, 'ai') || str_contains($phase, 'completed') ? 'done' : 'pending'),
+                                            'nuclei' => str_contains($phase, 'nuclei') ? 'running' : (str_contains($phase, 'ai') || str_contains($phase, 'completed') ? 'done' : 'pending'),
                                             'ai' => str_contains($phase, 'ai') ? 'running' : (str_contains($phase, 'completed') ? 'done' : 'pending'),
                                             default => 'pending',
                                         };
@@ -550,6 +595,8 @@
                                             <span class="inline-flex rounded-full border px-2 py-0.5 {{ $stepClass($zapState) }}">ZAP</span>
                                             @php $niktoState = $stepState('nikto'); @endphp
                                             <span class="inline-flex rounded-full border px-2 py-0.5 {{ $stepClass($niktoState) }}">Nikto</span>
+                                            @php $nucleiState = $stepState('nuclei'); @endphp
+                                            <span class="inline-flex rounded-full border px-2 py-0.5 {{ $stepClass($nucleiState) }}">Nuclei</span>
                                             @php $aiState = $stepState('ai'); @endphp
                                             <span class="inline-flex rounded-full border px-2 py-0.5 {{ $stepClass($aiState) }}">AI</span>
                                         </div>
@@ -557,7 +604,11 @@
                                     <td class="px-6 py-3">
                                         <div class="text-xs text-gray-700 space-y-0.5">
                                             <p class="font-medium text-gray-900">{{ (int) $scan->findings_count }} {{ __('total') }}</p>
-                                            <p>ZAP: {{ (int) $scan->zap_findings_count }} · Nikto: {{ (int) $scan->nikto_findings_count }}</p>
+                                            <p>
+                                                ZAP: {{ (int) $scan->zap_findings_count }}
+                                                · Nikto: {{ (int) $scan->nikto_findings_count }}
+                                                · Nuclei: {{ (int) ($scan->nuclei_findings_count ?? 0) }}
+                                            </p>
                                         </div>
                                     </td>
                                     <td class="px-6 py-3">
@@ -578,6 +629,7 @@
                                         @else
                                             —
                                         @endif
+                                        <p data-scan-queue-hint class="mt-1 text-[11px] text-indigo-600"></p>
                                     </td>
                                     <td class="px-6 py-3 text-right whitespace-nowrap">
                                         <div class="inline-flex items-center gap-2">
