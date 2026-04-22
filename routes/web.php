@@ -22,7 +22,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/scans/{scan}/progress', [ScanController::class, 'progress'])->name('scans.progress');
     Route::get('/scans/{scan}/report', [ScanController::class, 'report'])->name('scans.report');
     Route::get('/scans/{scan}/downloads/{kind}', [ScanController::class, 'downloadRaw'])
-        ->where('kind', 'zap|nikto|combined')
+        ->where('kind', 'zap|nikto|nuclei|gemini|groq|combined')
         ->name('scans.downloads.raw');
 });
 

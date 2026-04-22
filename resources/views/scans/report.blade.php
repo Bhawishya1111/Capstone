@@ -32,27 +32,29 @@
     <x-slot name="header">
         <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <div>
-                <h2 class="font-semibold text-xl text-gray-800 leading-tight">
+                <h2 class="wl-title">
                     {{ __('Scan report') }}
                 </h2>
-                <p class="text-sm text-gray-500 font-normal break-all">#{{ $scan->id }} — {{ $scan->url }}</p>
+                <p class="wl-subtitle break-all">#{{ $scan->id }} — {{ $scan->url }}</p>
             </div>
-            <a href="{{ route('dashboard') }}" class="text-sm font-medium text-indigo-600 hover:text-indigo-900">{{ __('← Dashboard') }}</a>
+            <a href="{{ route('dashboard') }}" class="wl-btn-secondary">{{ __('← Dashboard') }}</a>
         </div>
     </x-slot>
 
-    <div class="py-8">
-        <div class="max-w-5xl mx-auto sm:px-6 lg:px-8 space-y-8">
-            <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+    <div class="py-10 min-h-screen">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+            <div class="wl-card">
+                <div class="wl-card-body text-sm text-amber-950 border-l-4 border-amber-300 bg-amber-50/50 rounded-2xl">
                 <strong class="font-semibold">{{ __('Authorization.') }}</strong>
                 {{ __('This scan must have been run only on systems you own or are authorized to test.') }}
+                </div>
             </div>
 
-            <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div class="border-b border-gray-200 bg-gray-50 px-6 py-4">
+            <div class="wl-card overflow-hidden border-white/20">
+                <div class="wl-card-header">
                     <h3 class="text-lg font-medium text-gray-900">{{ __('Overview') }}</h3>
                 </div>
-                <dl class="grid grid-cols-1 gap-4 px-6 py-5 sm:grid-cols-2 text-sm">
+                <dl class="grid grid-cols-1 gap-5 px-6 py-6 sm:grid-cols-2 text-sm">
                     <div><dt class="text-gray-500">{{ __('Target URL') }}</dt><dd class="mt-1 font-medium text-gray-900 break-all">{{ $scan->url }}</dd></div>
                     <div><dt class="text-gray-500">{{ __('Status') }}</dt><dd class="mt-1 font-medium text-gray-900">{{ $scan->status }}</dd></div>
                     <div><dt class="text-gray-500">{{ __('Started') }}</dt><dd class="mt-1 text-gray-900">{{ $scan->created_at->format('Y-m-d H:i:s') }}</dd></div>
@@ -88,24 +90,39 @@
                 </dl>
             </div>
 
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-4">
+                <div class="rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-xl lg:col-span-3">
+                    <p class="text-xs uppercase tracking-[0.16em] text-indigo-200">{{ __('Quick summary') }}</p>
+                    <p class="mt-2 text-sm text-slate-200">
+                        {{ __('This run produced') }} <span class="font-semibold text-white">{{ $totalFindings }}</span> {{ __('findings across ZAP, Nikto, and Nuclei. Review critical/high items first, then verify remediation with a re-scan.') }}
+                    </p>
+                </div>
+                <div class="rounded-2xl border border-white/20 bg-white/10 p-4 backdrop-blur-xl">
+                    <p class="text-xs text-slate-400">{{ __('Status') }}</p>
+                    <p class="mt-1 text-sm font-semibold text-white">{{ strtoupper((string) $scan->status) }}</p>
+                    <p class="mt-3 text-xs text-slate-400">{{ __('Progress') }}</p>
+                    <p class="mt-1 text-sm font-semibold text-cyan-200">{{ (int) $scan->progress }}%</p>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-5">
-                <div class="rounded-lg border border-gray-200 bg-white p-4">
+                <div class="rounded-2xl border border-slate-200 bg-white/90 p-5 shadow-sm">
                     <p class="text-xs uppercase tracking-wide text-gray-500">{{ __('Total findings') }}</p>
                     <p class="mt-1 text-2xl font-semibold text-gray-900">{{ $totalFindings }}</p>
                 </div>
-                <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-4">
+                <div class="rounded-2xl border border-indigo-200/80 bg-indigo-50/80 p-5 shadow-sm">
                     <p class="text-xs uppercase tracking-wide text-indigo-700">{{ __('ZAP findings') }}</p>
                     <p class="mt-1 text-2xl font-semibold text-indigo-900">{{ $zapFindings->count() }}</p>
                 </div>
-                <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <div class="rounded-2xl border border-amber-200/80 bg-amber-50/80 p-5 shadow-sm">
                     <p class="text-xs uppercase tracking-wide text-amber-700">{{ __('Nikto findings') }}</p>
                     <p class="mt-1 text-2xl font-semibold text-amber-900">{{ $niktoFindings->count() }}</p>
                 </div>
-                <div class="rounded-lg border border-violet-200 bg-violet-50 p-4">
+                <div class="rounded-2xl border border-violet-200/80 bg-violet-50/80 p-5 shadow-sm">
                     <p class="text-xs uppercase tracking-wide text-violet-700">{{ __('Nuclei findings') }}</p>
                     <p class="mt-1 text-2xl font-semibold text-violet-900">{{ $nucleiFindings->count() }}</p>
                 </div>
-                <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                <div class="rounded-2xl border border-emerald-200/80 bg-emerald-50/80 p-5 shadow-sm">
                     <p class="text-xs uppercase tracking-wide text-emerald-700">{{ __('Scan duration') }}</p>
                     <p class="mt-1 text-xl font-semibold text-emerald-900">
                         @if ($scan->completed_at)
@@ -118,20 +135,23 @@
             </div>
 
             @if ($canViewTechnical)
-                <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                    <div class="border-b border-gray-200 bg-gray-50 px-6 py-4">
+                <div class="rounded-2xl border border-slate-200/80 bg-white/90 shadow-[0_1px_3px_rgba(15,23,42,0.08),0_18px_40px_rgba(15,23,42,0.06)] overflow-hidden">
+                    <div class="border-b border-slate-200 bg-slate-50/80 px-7 py-5">
                         <h3 class="text-lg font-medium text-gray-900">{{ __('Raw outputs') }}</h3>
                     </div>
-                    <ul class="divide-y divide-gray-100 px-6 py-4 text-sm">
+                    <ul class="divide-y divide-slate-100 px-7 py-5 text-sm">
                         <li class="flex justify-between py-2"><span>{{ __('ZAP') }}</span>@if ($rawAvailable['zap'])<a href="{{ route('scans.downloads.raw', [$scan, 'zap']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
                         <li class="flex justify-between py-2"><span>{{ __('Nikto') }}</span>@if ($rawAvailable['nikto'])<a href="{{ route('scans.downloads.raw', [$scan, 'nikto']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
+                        <li class="flex justify-between py-2"><span>{{ __('Nuclei') }}</span>@if ($rawAvailable['nuclei'])<a href="{{ route('scans.downloads.raw', [$scan, 'nuclei']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
+                        <li class="flex justify-between py-2"><span>{{ __('Gemini raw') }}</span>@if ($rawAvailable['gemini'])<a href="{{ route('scans.downloads.raw', [$scan, 'gemini']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
+                        <li class="flex justify-between py-2"><span>{{ __('Groq raw') }}</span>@if ($rawAvailable['groq'])<a href="{{ route('scans.downloads.raw', [$scan, 'groq']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
                         <li class="flex justify-between py-2"><span>{{ __('Combined') }}</span>@if ($rawAvailable['combined'])<a href="{{ route('scans.downloads.raw', [$scan, 'combined']) }}" class="font-medium text-indigo-600 hover:text-indigo-900">{{ __('Download') }}</a>@else <span class="text-gray-400">{{ __('Not available') }}</span>@endif</li>
                     </ul>
                 </div>
             @endif
 
             @if ($canViewTechnical)
-                <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                <div class="sticky top-24 z-20 rounded-xl border border-white/20 bg-white/10 shadow-sm backdrop-blur-xl overflow-hidden">
                     <div class="border-b border-gray-200 bg-gray-50 px-6 py-4">
                         <h3 class="text-lg font-medium text-gray-900">{{ __('Report view') }}</h3>
                     </div>

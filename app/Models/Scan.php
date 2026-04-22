@@ -37,11 +37,15 @@ class Scan extends Model
         'user_id',
         'website_id',
         'url',
+        'selected_tools',
         'status',
         'progress',
         'phase',
         'zap_raw_output_path',
         'nikto_raw_output_path',
+        'nuclei_raw_output_path',
+        'gemini_raw_output_path',
+        'groq_raw_output_path',
         'combined_raw_output_path',
         'ai_summary',
         'report_path',
@@ -53,6 +57,7 @@ class Scan extends Model
     {
         return [
             'completed_at' => 'datetime',
+            'selected_tools' => 'array',
         ];
     }
 

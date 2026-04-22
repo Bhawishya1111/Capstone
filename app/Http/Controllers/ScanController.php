@@ -108,7 +108,7 @@ class ScanController extends Controller
             ->visibleToUser($user)
             ->orderByDesc('created_at')
             ->limit(300)
-            ->get(['id', 'user_id', 'url', 'status', 'created_at', 'completed_at', 'ai_summary', 'zap_raw_output_path', 'nikto_raw_output_path']);
+            ->get(['id', 'user_id', 'url', 'status', 'created_at', 'completed_at', 'ai_summary', 'zap_raw_output_path', 'nikto_raw_output_path', 'nuclei_raw_output_path', 'gemini_raw_output_path', 'groq_raw_output_path']);
 
         $ownedTargets = $analyticsScans
             ->where('user_id', $user->id)
@@ -204,6 +204,11 @@ class ScanController extends Controller
             'nuclei' => (bool) config('wave.nuclei.enabled', false),
             'gemini' => (bool) config('wave.gemini.api_key'),
         ];
+        $scanToolOptions = [
+            ['key' => 'zap', 'label' => 'ZAP', 'enabled' => (bool) $enabledTools['zap']],
+            ['key' => 'nikto', 'label' => 'Nikto', 'enabled' => (bool) $enabledTools['nikto']],
+            ['key' => 'nuclei', 'label' => 'Nuclei', 'enabled' => (bool) $enabledTools['nuclei']],
+        ];
 
         $role = strtolower((string) $user->role);
 
@@ -254,7 +259,7 @@ class ScanController extends Controller
                 'findings_by_scanner' => $findingsByScanner,
                 'top_repeated_vulnerabilities' => $mostCommonVulns,
                 'raw_output_available_scans' => $analyticsScans
-                    ->filter(fn (Scan $s) => ! empty($s->zap_raw_output_path) || ! empty($s->nikto_raw_output_path))
+                    ->filter(fn (Scan $s) => ! empty($s->zap_raw_output_path) || ! empty($s->nikto_raw_output_path) || ! empty($s->nuclei_raw_output_path) || ! empty($s->gemini_raw_output_path) || ! empty($s->groq_raw_output_path))
                     ->count(),
                 'raw_output_total_scans' => $analyticsScans->count(),
                 'risk_score_history' => $riskScoreHistory,
@@ -270,6 +275,7 @@ class ScanController extends Controller
                 'risk_score_history' => $riskScoreHistory,
             ],
             'scans' => $scans,
+            'scanToolOptions' => $scanToolOptions,
         ]);
     }
 
@@ -326,7 +332,29 @@ class ScanController extends Controller
 
         $data = $request->validate([
             'url' => ['required', 'string', 'max:2048', 'url', 'regex:/^https?:\/\//i'],
+            'tools' => ['nullable', 'array'],
+            'tools.*' => ['string', 'in:zap,nikto,nuclei'],
         ]);
+
+        $enabledToolMap = [
+            'zap' => (bool) (config('wave.zap_local.host') && config('wave.zap_local.port')),
+            'nikto' => (bool) config('wave.nikto.enabled', true),
+            'nuclei' => (bool) config('wave.nuclei.enabled', false),
+        ];
+        $requestedTools = collect($data['tools'] ?? [])
+            ->map(fn ($t) => strtolower((string) $t))
+            ->unique()
+            ->values();
+        if ($requestedTools->isEmpty()) {
+            $requestedTools = collect(array_keys(array_filter($enabledToolMap)));
+        }
+        $selectedTools = $requestedTools
+            ->filter(fn (string $t) => ($enabledToolMap[$t] ?? false) === true)
+            ->values()
+            ->all();
+        if ($selectedTools === []) {
+            return redirect()->route('dashboard')->withErrors(['scan' => 'Please choose at least one enabled scanner tool.']);
+        }
 
         Website::query()->create([
             'url' => $data['url'],
@@ -361,14 +389,37 @@ class ScanController extends Controller
 
         $data = $request->validate([
             'url' => ['required', 'string', 'max:2048', 'url', 'regex:/^https?:\/\//i'],
+            'tools' => ['nullable', 'array'],
+            'tools.*' => ['string', 'in:zap,nikto,nuclei'],
         ]);
 
+        $enabledToolMap = [
+            'zap' => (bool) (config('wave.zap_local.host') && config('wave.zap_local.port')),
+            'nikto' => (bool) config('wave.nikto.enabled', true),
+            'nuclei' => (bool) config('wave.nuclei.enabled', false),
+        ];
+        $requestedTools = collect($data['tools'] ?? [])
+            ->map(fn ($tool) => strtolower((string) $tool))
+            ->unique()
+            ->values();
+        if ($requestedTools->isEmpty()) {
+            $requestedTools = collect(array_keys(array_filter($enabledToolMap)));
+        }
+        $selectedTools = $requestedTools
+            ->filter(fn (string $tool) => ($enabledToolMap[$tool] ?? false) === true)
+            ->values()
+            ->all();
+        if ($selectedTools === []) {
+            return redirect()->route('dashboard')->withErrors(['scan' => 'Please choose at least one enabled scanner tool.']);
+        }
+
         try {
-            $scan = DB::transaction(function () use ($user, $data) {
+            $scan = DB::transaction(function () use ($user, $data, $selectedTools) {
                 return Scan::query()->create([
                     'user_id' => $user->id,
                     'website_id' => null,
                     'url' => $data['url'],
+                    'selected_tools' => $selectedTools,
                     'status' => Scan::STATUS_RUNNING,
                     'progress' => 0,
                     'phase' => Scan::PHASE_STARTING,
@@ -595,9 +646,12 @@ class ScanController extends Controller
             ? [
                 'zap' => $this->rawFileExists($scan->zap_raw_output_path),
                 'nikto' => $this->rawFileExists($scan->nikto_raw_output_path),
+                'nuclei' => $this->rawFileExists($scan->nuclei_raw_output_path),
+                'gemini' => $this->rawFileExists($scan->gemini_raw_output_path),
+                'groq' => $this->rawFileExists($scan->groq_raw_output_path),
                 'combined' => $this->rawFileExists($scan->combined_raw_output_path),
             ]
-            : ['zap' => false, 'nikto' => false, 'combined' => false];
+            : ['zap' => false, 'nikto' => false, 'nuclei' => false, 'gemini' => false, 'groq' => false, 'combined' => false];
 
         $trendSeries = $canViewTechnical ? $this->buildTrendSeries($scan) : [];
         $comparableScans = $canViewTechnical
@@ -638,6 +692,9 @@ class ScanController extends Controller
         $column = match ($kind) {
             'zap' => 'zap_raw_output_path',
             'nikto' => 'nikto_raw_output_path',
+            'nuclei' => 'nuclei_raw_output_path',
+            'gemini' => 'gemini_raw_output_path',
+            'groq' => 'groq_raw_output_path',
             'combined' => 'combined_raw_output_path',
             default => abort(404),
         };
@@ -690,6 +747,9 @@ class ScanController extends Controller
         $paths = [
             $scan->zap_raw_output_path,
             $scan->nikto_raw_output_path,
+            $scan->nuclei_raw_output_path,
+            $scan->gemini_raw_output_path,
+            $scan->groq_raw_output_path,
             $scan->combined_raw_output_path,
             $scan->report_path,
         ];

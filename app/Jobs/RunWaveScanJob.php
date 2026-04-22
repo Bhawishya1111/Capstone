@@ -59,77 +59,83 @@ class RunWaveScanJob implements ShouldQueue
                 return;
             }
 
-            $zapRelative = "{$prefix}/zap-report.json";
-            $zapAbs = Storage::disk('local')->path($zapRelative);
+            if ($this->shouldRunTool($scan, 'zap')) {
+                $zapRelative = "{$prefix}/zap-report.json";
+                $zapAbs = Storage::disk('local')->path($zapRelative);
 
-            if (config('wave.scan_simulate', false)) {
-                $this->touchProgress($scan, 20, Scan::PHASE_ZAP_SPIDER);
-                $this->writeSimulatedZapReport($zapAbs, $scan->url);
-                $this->touchProgress($scan, 70, Scan::PHASE_ZAP_ACTIVE);
-            } elseif ($this->dockerAvailable()) {
-                $this->touchProgress($scan, 15, Scan::PHASE_ZAP_SPIDER);
-                $target = $this->urlForZapContainer($scan->url);
-                $image = config('wave.zap_docker_image', 'zaproxy/zap-stable');
+                if (config('wave.scan_simulate', false)) {
+                    $this->touchProgress($scan, 20, Scan::PHASE_ZAP_SPIDER);
+                    $this->writeSimulatedZapReport($zapAbs, $scan->url);
+                    $this->touchProgress($scan, 70, Scan::PHASE_ZAP_ACTIVE);
+                } elseif ($this->dockerAvailable()) {
+                    $this->touchProgress($scan, 15, Scan::PHASE_ZAP_SPIDER);
+                    $target = $this->urlForZapContainer($scan->url);
+                    $image = config('wave.zap_docker_image', 'zaproxy/zap-stable');
 
-                $result = Process::timeout($this->timeout)->run([
-                    'docker', 'run', '--rm',
-                    '--add-host=host.docker.internal:host-gateway',
-                    '-v', "{$workAbs}:/zap/wrk/:rw",
-                    $image,
-                    'zap-baseline.py',
-                    '-t', $target,
-                    '-J', '/zap/wrk/zap-report.json',
-                    '-I',
-                ]);
+                    $result = Process::timeout($this->timeout)->run([
+                        'docker', 'run', '--rm',
+                        '--add-host=host.docker.internal:host-gateway',
+                        '-v', "{$workAbs}:/zap/wrk/:rw",
+                        $image,
+                        'zap-baseline.py',
+                        '-t', $target,
+                        '-J', '/zap/wrk/zap-report.json',
+                        '-I',
+                    ]);
 
-                $exit = $result->exitCode();
-                if ($exit !== null && $exit > 3) {
+                    $exit = $result->exitCode();
+                    if ($exit !== null && $exit > 3) {
+                        throw new \RuntimeException(
+                            'ZAP baseline failed (exit '.$exit.'): '.($result->errorOutput() ?: $result->output())
+                        );
+                    }
+
+                    if (! is_file($zapAbs)) {
+                        throw new \RuntimeException(
+                            'ZAP did not produce zap-report.json. Output: '.substr($result->output().$result->errorOutput(), 0, 2000)
+                        );
+                    }
+
+                    $this->touchProgress($scan, 65, Scan::PHASE_ZAP_ACTIVE);
+                } elseif ($this->localZapConfigured()) {
+                    $this->touchProgress($scan, 15, Scan::PHASE_ZAP_SPIDER);
+                    $this->runZapViaLocalApi($scan, $zapAbs, $scan->url);
+                    $this->touchProgress($scan, 65, Scan::PHASE_ZAP_ACTIVE);
+                } else {
                     throw new \RuntimeException(
-                        'ZAP baseline failed (exit '.$exit.'): '.($result->errorOutput() ?: $result->output())
+                        'No ZAP backend available. Options: (1) Install Docker and pull '.config('wave.zap_docker_image', 'zaproxy/zap-stable').
+                        ', (2) start ZAP in daemon mode and set ZAP_HOST and ZAP_PORT in .env (optional ZAP_API_KEY), or (3) set WAVE_SCAN_SIMULATE=true for a stub run.'
                     );
                 }
 
-                if (! is_file($zapAbs)) {
-                    throw new \RuntimeException(
-                        'ZAP did not produce zap-report.json. Output: '.substr($result->output().$result->errorOutput(), 0, 2000)
-                    );
+                $scan = $this->refreshScanOrStop();
+                if (! $scan) {
+                    return;
                 }
+                $scan->zap_raw_output_path = $zapRelative;
+                $scan->save();
 
-                $this->touchProgress($scan, 65, Scan::PHASE_ZAP_ACTIVE);
-            } elseif ($this->localZapConfigured()) {
-                $this->touchProgress($scan, 15, Scan::PHASE_ZAP_SPIDER);
-                $this->runZapViaLocalApi($scan, $zapAbs, $scan->url);
-                $this->touchProgress($scan, 65, Scan::PHASE_ZAP_ACTIVE);
-            } else {
-                throw new \RuntimeException(
-                    'No ZAP backend available. Options: (1) Install Docker and pull '.config('wave.zap_docker_image', 'zaproxy/zap-stable').
-                    ', (2) start ZAP in daemon mode and set ZAP_HOST and ZAP_PORT in .env (optional ZAP_API_KEY), or (3) set WAVE_SCAN_SIMULATE=true for a stub run.'
-                );
+                ScanFinding::query()->where('scan_id', $scan->id)->where('source', ScanFinding::SOURCE_ZAP)->delete();
+                $this->ingestZapReport($scan, $zapAbs);
             }
-
-            $scan = $this->refreshScanOrStop();
-            if (! $scan) {
-                return;
-            }
-            $scan->zap_raw_output_path = $zapRelative;
-            $scan->save();
-
-            ScanFinding::query()->where('scan_id', $scan->id)->where('source', ScanFinding::SOURCE_ZAP)->delete();
-            $this->ingestZapReport($scan, $zapAbs);
 
             $this->touchProgress($scan, 85, Scan::PHASE_NIKTO);
             $scan = $this->refreshScanOrStop();
             if (! $scan) {
                 return;
             }
-            $this->runNiktoIfConfigured($scan, $prefix);
+            if ($this->shouldRunTool($scan, 'nikto')) {
+                $this->runNiktoIfConfigured($scan, $prefix);
+            }
 
             $this->touchProgress($scan, 89, Scan::PHASE_NUCLEI);
             $scan = $this->refreshScanOrStop();
             if (! $scan) {
                 return;
             }
-            $this->runNucleiIfConfigured($scan, $prefix);
+            if ($this->shouldRunTool($scan, 'nuclei')) {
+                $this->runNucleiIfConfigured($scan, $prefix);
+            }
 
             $combinedRelative = "{$prefix}/combined-summary.txt";
             $this->writeCombinedSummary($scan, Storage::disk('local')->path($combinedRelative));
@@ -186,6 +192,21 @@ class RunWaveScanJob implements ShouldQueue
         $scan->save();
     }
 
+    private function shouldRunTool(Scan $scan, string $tool): bool
+    {
+        $selected = $scan->selected_tools;
+        if (! is_array($selected) || $selected === []) {
+            return true;
+        }
+
+        $normalized = array_values(array_unique(array_map(
+            fn ($t) => strtolower((string) $t),
+            $selected
+        )));
+
+        return in_array(strtolower($tool), $normalized, true);
+    }
+
     private function dockerAvailable(): bool
     {
         $r = Process::run(['docker', 'version']);
@@ -223,6 +244,24 @@ class RunWaveScanJob implements ShouldQueue
     }
 
     /**
+     * Some macOS Docker setups can only reach host ZAP reliably when the Host
+     * header is localhost, even though the TCP destination is host.docker.internal.
+     *
+     * @return array<string, string>
+     */
+    private function zapApiHeaders(): array
+    {
+        $host = (string) config('wave.zap_local.host', '');
+        $port = (int) config('wave.zap_local.port', 8080);
+
+        if ($host === 'host.docker.internal') {
+            return ['Host' => '127.0.0.1:'.$port];
+        }
+
+        return [];
+    }
+
+    /**
      * Drive a running ZAP instance: new session, traditional spider, wait for passive queue, export alerts as baseline-shaped JSON.
      */
     private function runZapViaLocalApi(Scan $scan, string $zapReportPath, string $targetUrl): void
@@ -242,7 +281,10 @@ class RunWaveScanJob implements ShouldQueue
             $pscanWait = 45;
         }
 
-        $ping = Http::connectTimeout(5)->timeout(10)->get($base.'/JSON/core/view/version/', $this->zapApiQuery());
+        $ping = Http::withHeaders($this->zapApiHeaders())
+            ->connectTimeout(5)
+            ->timeout(10)
+            ->get($base.'/JSON/core/view/version/', $this->zapApiQuery());
         if (! $ping->successful()) {
             throw new \RuntimeException(
                 'ZAP API not reachable at '.$base.'. Start ZAP in daemon mode on that host/port, or fix ZAP_HOST/ZAP_PORT.'
@@ -250,12 +292,12 @@ class RunWaveScanJob implements ShouldQueue
         }
 
         $sessionName = 'wave-scan-'.$scan->id;
-        Http::timeout($httpTimeout)->get(
+        Http::withHeaders($this->zapApiHeaders())->timeout($httpTimeout)->get(
             $base.'/JSON/core/action/newSession/',
             $this->zapApiQuery(['name' => $sessionName, 'overwrite' => 'true'])
         );
 
-        $spiderStart = Http::timeout($httpTimeout)->get(
+        $spiderStart = Http::withHeaders($this->zapApiHeaders())->timeout($httpTimeout)->get(
             $base.'/JSON/spider/action/scan/',
             $this->zapApiQuery([
                 'url' => $targetUrl,
@@ -274,7 +316,7 @@ class RunWaveScanJob implements ShouldQueue
 
         $deadline = time() + min(max(30, $this->timeout - 60), $spiderTimeout);
         while (time() < $deadline) {
-            $st = Http::timeout(30)->get(
+            $st = Http::withHeaders($this->zapApiHeaders())->timeout(30)->get(
                 $base.'/JSON/spider/view/status/',
                 $this->zapApiQuery(['scanId' => (string) $spiderScanId])
             );
@@ -292,7 +334,9 @@ class RunWaveScanJob implements ShouldQueue
 
         $pscanDeadline = time() + $pscanWait;
         while (time() < $pscanDeadline) {
-            $left = Http::timeout(15)->get($base.'/JSON/pscan/view/recordsToScan/', $this->zapApiQuery());
+            $left = Http::withHeaders($this->zapApiHeaders())
+                ->timeout(15)
+                ->get($base.'/JSON/pscan/view/recordsToScan/', $this->zapApiQuery());
             if (! $left->successful()) {
                 sleep(1);
 
@@ -327,7 +371,7 @@ class RunWaveScanJob implements ShouldQueue
         $page = 500;
 
         while (true) {
-            $r = Http::timeout(120)->get(
+            $r = Http::withHeaders($this->zapApiHeaders())->timeout(120)->get(
                 $base.'/JSON/core/view/alerts/',
                 $this->zapApiQuery([
                     'baseurl' => $targetUrl,
@@ -501,9 +545,8 @@ class RunWaveScanJob implements ShouldQueue
         $niktoLine = $scan->nikto_raw_output_path
             ? 'Nikto report: '.$scan->nikto_raw_output_path
             : 'Nikto: not run (disabled, unavailable, or produced no output file).';
-        $nucleiRelative = "scans/{$scan->id}/nuclei-report.jsonl";
-        $nucleiLine = Storage::disk('local')->exists($nucleiRelative)
-            ? 'Nuclei report: '.$nucleiRelative
+        $nucleiLine = (is_string($scan->nuclei_raw_output_path) && $scan->nuclei_raw_output_path !== '')
+            ? 'Nuclei report: '.$scan->nuclei_raw_output_path
             : 'Nuclei: not run (disabled, unavailable, or produced no output file).';
 
         $lines = [
@@ -520,6 +563,14 @@ class RunWaveScanJob implements ShouldQueue
     {
         $geminiSummary = $this->buildGeminiSummary($scan);
         if (is_string($geminiSummary) && $geminiSummary !== '') {
+            if (! is_string($scan->groq_raw_output_path) || $scan->groq_raw_output_path === '') {
+                $this->storeAiRawPayload($scan, 'groq', [
+                    'provider' => 'groq',
+                    'status' => 'skipped',
+                    'reason' => 'Skipped because Gemini produced a summary.',
+                ]);
+            }
+
             return $geminiSummary;
         }
 
@@ -540,6 +591,11 @@ class RunWaveScanJob implements ShouldQueue
         $apiKey = config('wave.gemini.api_key');
         if (! is_string($apiKey) || $apiKey === '') {
             $this->geminiFailureReason = 'Gemini API key is not configured.';
+            $this->storeAiRawPayload($scan, 'gemini', [
+                'provider' => 'gemini',
+                'status' => 'not_configured',
+                'reason' => $this->geminiFailureReason,
+            ]);
             return null;
         }
 
@@ -585,6 +641,13 @@ class RunWaveScanJob implements ShouldQueue
 
                 if (! $response->successful()) {
                     $this->geminiFailureReason = 'Gemini request failed (model '.$model.', HTTP '.$response->status().').';
+                    $this->storeAiRawPayload($scan, 'gemini', [
+                        'provider' => 'gemini',
+                        'status' => 'http_error',
+                        'model' => $model,
+                        'http_status' => $response->status(),
+                        'response' => $response->json() ?? $response->body(),
+                    ]);
                     Log::warning('WAVe-Lite: Gemini summary request failed', [
                         'scan_id' => $scan->id,
                         'model' => $model,
@@ -599,10 +662,24 @@ class RunWaveScanJob implements ShouldQueue
                 $paragraph = trim($text);
                 if ($paragraph !== '') {
                     $this->geminiFailureReason = null;
+                    $this->storeAiRawPayload($scan, 'gemini', [
+                        'provider' => 'gemini',
+                        'status' => 'ok',
+                        'model' => $model,
+                        'http_status' => $response->status(),
+                        'response' => $response->json() ?? $response->body(),
+                    ]);
                     return $paragraph;
                 }
 
                 $this->geminiFailureReason = 'Gemini returned an empty response (model '.$model.').';
+                $this->storeAiRawPayload($scan, 'gemini', [
+                    'provider' => 'gemini',
+                    'status' => 'empty',
+                    'model' => $model,
+                    'http_status' => $response->status(),
+                    'response' => $response->json() ?? $response->body(),
+                ]);
                 Log::warning('WAVe-Lite: Gemini response was empty', [
                     'scan_id' => $scan->id,
                     'model' => $model,
@@ -616,6 +693,11 @@ class RunWaveScanJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
             $this->geminiFailureReason = 'Gemini request exception: '.$e->getMessage();
+            $this->storeAiRawPayload($scan, 'gemini', [
+                'provider' => 'gemini',
+                'status' => 'exception',
+                'error' => $e->getMessage(),
+            ]);
 
             return null;
         }
@@ -626,6 +708,11 @@ class RunWaveScanJob implements ShouldQueue
         $apiKey = config('wave.groq.api_key');
         if (! is_string($apiKey) || trim($apiKey) === '') {
             $this->groqFailureReason = 'Groq API key is not configured.';
+            $this->storeAiRawPayload($scan, 'groq', [
+                'provider' => 'groq',
+                'status' => 'not_configured',
+                'reason' => $this->groqFailureReason,
+            ]);
 
             return null;
         }
@@ -654,6 +741,13 @@ class RunWaveScanJob implements ShouldQueue
 
             if (! $response->successful()) {
                 $this->groqFailureReason = 'Groq request failed (model '.$model.', HTTP '.$response->status().').';
+                $this->storeAiRawPayload($scan, 'groq', [
+                    'provider' => 'groq',
+                    'status' => 'http_error',
+                    'model' => $model,
+                    'http_status' => $response->status(),
+                    'response' => $response->json() ?? $response->body(),
+                ]);
                 Log::warning('WAVe-Lite: Groq summary request failed', [
                     'scan_id' => $scan->id,
                     'model' => $model,
@@ -668,6 +762,13 @@ class RunWaveScanJob implements ShouldQueue
             $summary = trim($text);
             if ($summary === '') {
                 $this->groqFailureReason = 'Groq returned an empty response (model '.$model.').';
+                $this->storeAiRawPayload($scan, 'groq', [
+                    'provider' => 'groq',
+                    'status' => 'empty',
+                    'model' => $model,
+                    'http_status' => $response->status(),
+                    'response' => $response->json() ?? $response->body(),
+                ]);
                 Log::warning('WAVe-Lite: Groq response was empty', [
                     'scan_id' => $scan->id,
                     'model' => $model,
@@ -677,6 +778,13 @@ class RunWaveScanJob implements ShouldQueue
             }
 
             $this->groqFailureReason = null;
+            $this->storeAiRawPayload($scan, 'groq', [
+                'provider' => 'groq',
+                'status' => 'ok',
+                'model' => $model,
+                'http_status' => $response->status(),
+                'response' => $response->json() ?? $response->body(),
+            ]);
 
             return $summary;
         } catch (\Throwable $e) {
@@ -685,13 +793,51 @@ class RunWaveScanJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
             $this->groqFailureReason = 'Groq request exception: '.$e->getMessage();
+            $this->storeAiRawPayload($scan, 'groq', [
+                'provider' => 'groq',
+                'status' => 'exception',
+                'error' => $e->getMessage(),
+            ]);
 
             return null;
         }
     }
 
     /**
-     * @return array{target_url: string, zap_findings: array<int, array<string, mixed>>, nikto_findings: array<int, array<string, mixed>>, nuclei_findings: array<int, array<string, mixed>>}
+     * Persist downloadable AI provider raw output payloads under storage/app/scans/{id}.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function storeAiRawPayload(Scan $scan, string $provider, array $payload): void
+    {
+        if (! in_array($provider, ['gemini', 'groq'], true)) {
+            return;
+        }
+
+        $relative = "scans/{$scan->id}/{$provider}-raw.json";
+        $abs = Storage::disk('local')->path($relative);
+        $encoded = json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        if ($encoded === false) {
+            return;
+        }
+
+        if (file_put_contents($abs, $encoded) === false) {
+            return;
+        }
+
+        $column = $provider.'_raw_output_path';
+        $scan->{$column} = $relative;
+        $scan->save();
+    }
+
+    /**
+     * @return array{
+     *   target_url: string,
+     *   scanner_summary: array{zap_findings_count: int, nikto_findings_count: int, nuclei_findings_count: int, nuclei_raw_available: bool},
+     *   zap_findings: array<int, array<string, mixed>>,
+     *   nikto_findings: array<int, array<string, mixed>>,
+     *   nuclei_findings: array<int, array<string, mixed>>
+     * }
      */
     private function buildSummaryInput(Scan $scan): array
     {
@@ -719,8 +865,16 @@ class RunWaveScanJob implements ShouldQueue
             ->get(['title', 'severity', 'normalized_severity', 'endpoint', 'description'])
             ->toArray();
 
+        $nucleiRawPath = "scans/{$scan->id}/nuclei-report.jsonl";
+
         return [
             'target_url' => $scan->url,
+            'scanner_summary' => [
+                'zap_findings_count' => count($zapFindings),
+                'nikto_findings_count' => count($niktoFindings),
+                'nuclei_findings_count' => count($nucleiFindings),
+                'nuclei_raw_available' => Storage::disk('local')->exists($nucleiRawPath),
+            ],
             'zap_findings' => $zapFindings,
             'nikto_findings' => $niktoFindings,
             'nuclei_findings' => $nucleiFindings,
@@ -728,7 +882,13 @@ class RunWaveScanJob implements ShouldQueue
     }
 
     /**
-     * @param  array{target_url: string, zap_findings: array<int, array<string, mixed>>, nikto_findings: array<int, array<string, mixed>>, nuclei_findings: array<int, array<string, mixed>>}  $input
+     * @param  array{
+     *   target_url: string,
+     *   scanner_summary: array{zap_findings_count: int, nikto_findings_count: int, nuclei_findings_count: int, nuclei_raw_available: bool},
+     *   zap_findings: array<int, array<string, mixed>>,
+     *   nikto_findings: array<int, array<string, mixed>>,
+     *   nuclei_findings: array<int, array<string, mixed>>
+     * }  $input
      */
     private function buildSummaryPrompt(array $input): string
     {
@@ -737,6 +897,7 @@ class RunWaveScanJob implements ShouldQueue
             "Use 4-6 short paragraphs, not bullet points, and keep language clear but not overly simplified.\n".
             "Explain: (1) overall risk posture, (2) most important weaknesses found, (3) why they matter in real-world attack scenarios,\n".
             "(4) affected endpoints/assets, and (5) a prioritized remediation plan with immediate, short-term, and medium-term actions.\n".
+            "Explicitly include scanner coverage for ZAP, Nikto, and Nuclei, including when a scanner returns zero findings.\n".
             "If technical terms are used, briefly explain them in context.\n".
             "Do not invent findings or endpoints. Use only provided input and be explicit about uncertainty when data is limited.\n".
             "Return plain text only (no JSON, no bullets, no markdown, no headings).\n".
@@ -923,10 +1084,25 @@ class RunWaveScanJob implements ShouldQueue
 
         $result = Process::timeout($timeout)->run($command);
         if (! is_file($nucleiAbs)) {
+            $noFindingsRelative = "{$prefix}/nuclei-no-findings.txt";
+            $noFindingsAbs = Storage::disk('local')->path($noFindingsRelative);
+            $lines = [
+                'Nuclei produced no findings output file.',
+                'Target: '.$scan->url,
+                'Severity filter: '.(is_string($severity) && trim($severity) !== '' ? trim($severity) : 'default'),
+                'Exit code: '.(string) ($result->exitCode() ?? 'unknown'),
+                'Generated at: '.now()->toDateTimeString(),
+            ];
+            file_put_contents($noFindingsAbs, implode("\n", $lines)."\n");
+
+            $scan->nuclei_raw_output_path = $noFindingsRelative;
+            $scan->save();
+
             Log::warning('WAVe-Lite: Nuclei did not write an output file', [
                 'scan_id' => $scan->id,
                 'exit' => $result->exitCode(),
                 'output' => substr($result->output().$result->errorOutput(), 0, 2000),
+                'fallback_path' => $noFindingsRelative,
             ]);
 
             return;
@@ -934,6 +1110,8 @@ class RunWaveScanJob implements ShouldQueue
 
         ScanFinding::query()->where('scan_id', $scan->id)->where('source', ScanFinding::SOURCE_NUCLEI)->delete();
         $this->ingestNucleiReport($scan, $nucleiAbs);
+        $scan->nuclei_raw_output_path = $nucleiRelative;
+        $scan->save();
 
         if ($result->failed()) {
             Log::info('WAVe-Lite: Nuclei process exited non-zero', [

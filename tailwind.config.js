@@ -12,7 +12,19 @@ export default {
     theme: {
         extend: {
             fontFamily: {
-                sans: ['Figtree', ...defaultTheme.fontFamily.sans],
+                // Apple-like system font stack (SF on macOS/iOS, sensible fallbacks elsewhere).
+                sans: [
+                    'ui-sans-serif',
+                    'system-ui',
+                    '-apple-system',
+                    'BlinkMacSystemFont',
+                    '"SF Pro Display"',
+                    '"SF Pro Text"',
+                    '"Helvetica Neue"',
+                    'Arial',
+                    'Figtree',
+                    ...defaultTheme.fontFamily.sans,
+                ],
             },
         },
     },

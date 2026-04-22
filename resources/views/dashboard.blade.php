@@ -5,89 +5,136 @@
     <x-slot name="header">
         <div class="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <div>
-                <h2 class="font-semibold text-xl text-gray-800 leading-tight">
+                <h2 class="wl-title">
                     {{ __('WAVe-Lite') }}
                 </h2>
-                <p class="text-sm text-gray-500 font-normal">{{ __('Security scanning operations dashboard') }}</p>
+                <p class="wl-subtitle">{{ __('Security scanning operations dashboard') }}</p>
                 @php
                     $role = strtolower((string) auth()->user()?->role);
                     $rolePill = match ($role) {
-                        'admin' => 'bg-red-100 text-red-800 border-red-200',
-                        'analyst' => 'bg-amber-100 text-amber-800 border-amber-200',
-                        default => 'bg-blue-100 text-blue-800 border-blue-200',
+                        'admin' => 'wl-chip wl-chip-red',
+                        'analyst' => 'wl-chip wl-chip-amber',
+                        default => 'wl-chip wl-chip-blue',
                     };
                 @endphp
-                <span class="mt-2 inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium {{ $rolePill }}">
+                <span class="mt-2 {{ $rolePill }}">
                     {{ __('Role') }}: {{ ucfirst($role ?: 'user') }}
                 </span>
             </div>
             <div class="text-xs text-gray-500">
                 {{ __('Last scan:') }}
-                <span class="font-medium text-gray-700">
+                <span class="font-medium text-slate-700">
                     {{ $stats['last_scan_at'] ? \Illuminate\Support\Carbon::parse($stats['last_scan_at'])->format('Y-m-d H:i') : '—' }}
                 </span>
             </div>
         </div>
     </x-slot>
 
-    <div class="py-8">
-        <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-8">
+    <div class="py-10">
+        <div class="wl-container space-y-8">
+            <section class="wl-card overflow-hidden border-white/20">
+                <div class="wl-card-body py-3">
+                    <div class="flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div class="flex items-center gap-2">
+                            <span class="wl-chip wl-chip-green">{{ __('System') }}: {{ __('Online') }}</span>
+                            <span class="wl-chip wl-chip-blue">{{ __('Queue') }}: {{ (int) ($statusBreakdown[\App\Models\Scan::STATUS_QUEUED] ?? 0) }}</span>
+                            <span class="wl-chip wl-chip-amber">{{ __('Running') }}: {{ (int) ($statusBreakdown[\App\Models\Scan::STATUS_RUNNING] ?? 0) }}</span>
+                        </div>
+                        <p class="text-slate-300">
+                            {{ __('Avg scan duration') }}:
+                            <span class="font-semibold text-white">
+                                @if ($stats['avg_duration_seconds'] > 0)
+                                    {{ gmdate('H:i:s', (int) $stats['avg_duration_seconds']) }}
+                                @else
+                                    —
+                                @endif
+                            </span>
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="wl-card overflow-hidden border-white/20">
+                <div class="wl-card-body py-8">
+                    <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                        <div>
+                            <p class="text-xs font-medium uppercase tracking-[0.20em] text-indigo-200">{{ __('WAVe-Lite Security Suite') }}</p>
+                            <h1 class="mt-2 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl" style="color: #020617 !important;">
+                                {{ __('Glass security cockpit for continuous scanning.') }}
+                            </h1>
+                            <p class="mt-3 max-w-2xl text-sm text-slate-300">
+                                {{ __('Launch authorized scans instantly, monitor system health, and review risk posture with a cleaner, sharper command center.') }}
+                            </p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="wl-chip wl-chip-neutral border-white/30 bg-white/10 text-white">{{ __('Scans') }}: {{ $stats['total_scans'] }}</span>
+                            <span class="wl-chip wl-chip-green border-emerald-300/40 bg-emerald-400/10 text-emerald-200">{{ __('Success') }}: {{ $stats['success_rate'] !== null ? $stats['success_rate'].'%' : '—' }}</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
             {{-- Legal / ethics — scans only on authorized targets --}}
-            <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <div class="wl-card">
+                <div class="wl-card-body text-sm text-amber-950 border-l-4 border-amber-300 bg-amber-50/50 rounded-2xl">
                 <strong class="font-semibold">{{ __('Authorization required.') }}</strong>
                 {{ __('Run scanners only on sites, APIs, or servers you own or have explicit written permission to test. Unauthorized scanning may violate law.') }}
+                </div>
             </div>
 
             @if (session('status'))
-                <div class="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+                <div class="wl-card hover:shadow-[0_1px_2px_rgba(15,23,42,0.06),0_24px_55px_rgba(15,23,42,0.08)] transition">
+                    <div class="wl-card-body text-sm text-emerald-900 border-l-4 border-emerald-300 bg-emerald-50/50 rounded-2xl">
                     {{ session('status') }}
+                    </div>
                 </div>
             @endif
 
             @if ($errors->any())
-                <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+                <div class="wl-card">
+                    <div class="wl-card-body text-sm text-rose-900 border-l-4 border-rose-300 bg-rose-50/50 rounded-2xl">
                     <ul class="list-disc list-inside space-y-1">
                         @foreach ($errors->all() as $error)
                             <li>{{ $error }}</li>
                         @endforeach
                     </ul>
+                    </div>
                 </div>
             @endif
 
             {{-- Stats --}}
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
-                <div class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                <div class="wl-card">
                     <div class="p-5">
                         <p class="text-sm font-medium text-gray-500">{{ __('Total scans') }}</p>
                         <p class="mt-1 text-3xl font-semibold tracking-tight text-gray-900">{{ $stats['total_scans'] }}</p>
                     </div>
                 </div>
-                <div class="overflow-hidden rounded-xl border border-indigo-200 bg-indigo-50/80 shadow-sm">
+                <div class="wl-card border-indigo-200/70 bg-indigo-50/50 hover:shadow-[0_1px_2px_rgba(15,23,42,0.06),0_24px_55px_rgba(99,102,241,0.18)] transition">
                     <div class="p-5">
                         <p class="text-sm font-medium text-indigo-800">{{ __('Queued') }}</p>
                         <p class="mt-1 text-3xl font-semibold tracking-tight text-indigo-950">{{ $stats['queued_scans'] }}</p>
                     </div>
                 </div>
-                <div class="overflow-hidden rounded-xl border border-blue-200 bg-blue-50/80 shadow-sm">
+                <div class="wl-card border-sky-200/70 bg-sky-50/50 hover:shadow-[0_1px_2px_rgba(15,23,42,0.06),0_24px_55px_rgba(14,165,233,0.18)] transition">
                     <div class="p-5">
-                        <p class="text-sm font-medium text-blue-800">{{ __('Running') }}</p>
-                        <p class="mt-1 text-3xl font-semibold tracking-tight text-blue-950">{{ $stats['running_scans'] }}</p>
+                        <p class="text-sm font-medium text-sky-800">{{ __('Running') }}</p>
+                        <p class="mt-1 text-3xl font-semibold tracking-tight text-sky-950">{{ $stats['running_scans'] }}</p>
                     </div>
                 </div>
-                <div class="overflow-hidden rounded-xl border border-green-200 bg-green-50/80 shadow-sm">
+                <div class="wl-card border-emerald-200/70 bg-emerald-50/50 hover:shadow-[0_1px_2px_rgba(15,23,42,0.06),0_24px_55px_rgba(16,185,129,0.16)] transition">
                     <div class="p-5">
                         <p class="text-sm font-medium text-green-800">{{ __('Completed') }}</p>
                         <p class="mt-1 text-3xl font-semibold tracking-tight text-green-950">{{ $stats['completed_scans'] }}</p>
                     </div>
                 </div>
-                <div class="overflow-hidden rounded-xl border border-red-200 bg-red-50/80 shadow-sm">
+                <div class="wl-card border-rose-200/70 bg-rose-50/50 hover:shadow-[0_1px_2px_rgba(15,23,42,0.06),0_24px_55px_rgba(244,63,94,0.16)] transition">
                     <div class="p-5">
                         <p class="text-sm font-medium text-red-800">{{ __('Failed') }}</p>
                         <p class="mt-1 text-3xl font-semibold tracking-tight text-red-950">{{ $stats['failed_scans'] }}</p>
                     </div>
                 </div>
-                <div class="overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50/80 shadow-sm">
+                <div class="wl-card border-emerald-200/70 bg-emerald-50/50 hover:shadow-[0_1px_2px_rgba(15,23,42,0.06),0_24px_55px_rgba(16,185,129,0.16)] transition">
                     <div class="p-5">
                         <p class="text-sm font-medium text-emerald-800">{{ __('Success rate') }}</p>
                         <p class="mt-1 text-3xl font-semibold tracking-tight text-emerald-950">
@@ -107,7 +154,7 @@
                         <div class="rounded-lg border border-gray-200 bg-gray-50 p-3"><p class="text-gray-500">{{ __('Total users') }}</p><p class="mt-1 text-xl font-semibold text-gray-900">{{ $adminMetrics['total_users'] }}</p></div>
                         <div class="rounded-lg border border-amber-200 bg-amber-50 p-3"><p class="text-amber-700">{{ __('Pending approvals') }}</p><p class="mt-1 text-xl font-semibold text-amber-900">{{ $adminMetrics['pending_approvals'] ?? 'Not enabled' }}</p></div>
                         <div class="rounded-lg border border-blue-200 bg-blue-50 p-3"><p class="text-blue-700">{{ __('Active scans') }}</p><p class="mt-1 text-xl font-semibold text-blue-900">{{ $adminMetrics['active_scans'] }}</p></div>
-                        <div class="rounded-lg border border-green-200 bg-green-50 p-3"><p class="text-green-700">{{ __('Enabled tools') }}</p><p class="mt-1 text-xl font-semibold text-green-900">{{ $adminMetrics['enabled_tools_count'] }}/3</p></div>
+                        <div class="rounded-lg border border-green-200 bg-green-50 p-3"><p class="text-green-700">{{ __('Enabled tools') }}</p><p class="mt-1 text-xl font-semibold text-green-900">{{ $adminMetrics['enabled_tools_count'] }}/4</p></div>
                         <div class="rounded-lg border border-purple-200 bg-purple-50 p-3"><p class="text-purple-700">{{ __('Gemini summaries') }}</p><p class="mt-1 text-xl font-semibold text-purple-900">{{ $adminMetrics['gemini_usage']['total_ai_summaries'] }}</p></div>
                     </div>
                     <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-3 text-sm">
@@ -226,7 +273,8 @@
             @endif
 
             <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm lg:col-span-2">
+            <div class="wl-card lg:col-span-2">
+                <div class="wl-card-body">
                     <div class="flex items-center justify-between gap-4">
                         <h3 class="text-lg font-medium text-gray-900">{{ __('Risk posture') }}</h3>
                         <span class="text-xs text-gray-500">{{ __('From all findings you can access') }}</span>
@@ -278,16 +326,19 @@
                         {{ __('completed scans produced Nikto output.') }}
                     </p>
                 </div>
-                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                </div>
+                <div class="wl-card">
+                    <div class="wl-card-body">
                     <h3 class="text-lg font-medium text-gray-900">{{ __('Quick actions') }}</h3>
                     <div class="mt-4 space-y-2 text-sm">
-                        <a href="{{ route('dashboard') }}" class="block rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 font-medium text-indigo-700 hover:bg-indigo-100">{{ __('Refresh dashboard') }}</a>
-                        <a href="{{ route('profile.edit') }}" class="block rounded-md border border-gray-200 bg-gray-50 px-3 py-2 font-medium text-gray-700 hover:bg-gray-100">{{ __('Manage profile') }}</a>
+                        <a href="{{ route('dashboard') }}" class="block wl-btn-primary text-center">{{ __('Refresh dashboard') }}</a>
+                        <a href="{{ route('profile.edit') }}" class="block wl-btn-secondary text-center">{{ __('Manage profile') }}</a>
                         @if (auth()->user()?->isAdmin())
-                            <a href="{{ route('users.index') }}" class="block rounded-md border border-amber-200 bg-amber-50 px-3 py-2 font-medium text-amber-800 hover:bg-amber-100">{{ __('Manage users & roles') }}</a>
+                            <a href="{{ route('users.index') }}" class="block wl-btn-secondary text-center">{{ __('Manage users & roles') }}</a>
                         @endif
                     </div>
                     <p class="mt-4 text-xs text-gray-500">{{ __('Tip: Use the report page for remediation tracking and scan comparisons.') }}</p>
+                </div>
                 </div>
             </div>
 
@@ -436,7 +487,7 @@
             </div>
 
             <div class="grid grid-cols-1 gap-6 xl:grid-cols-3">
-                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm xl:col-span-2">
+                <div class="rounded-2xl border border-white/20 bg-white/10 p-6 shadow-xl backdrop-blur-xl xl:col-span-2 xl:sticky xl:top-24">
                     <h3 class="text-lg font-medium text-gray-900">{{ __('Start scan') }}</h3>
                     <p class="mt-1 text-sm text-gray-500">{{ __('Enter any authorized http(s) URL to scan.') }}</p>
                     <form method="POST" action="{{ route('scans.start') }}" class="mt-4 space-y-4">
@@ -446,10 +497,48 @@
                             <x-text-input id="url" class="block mt-1 w-full" type="url" name="url" :value="old('url')" required placeholder="https://example.com" />
                             <x-input-error :messages="$errors->get('url')" class="mt-2" />
                         </div>
-                        <x-primary-button>{{ __('Start scan') }}</x-primary-button>
+                        <div>
+                            <x-input-label :value="__('Scanner tools')" />
+                            <p class="mt-1 text-xs text-gray-500">{{ __('Choose one or more tools for this scan.') }}</p>
+                            <div class="mt-2 flex flex-wrap gap-2">
+                                @php
+                                    $oldTools = old('tools');
+                                    if (! is_array($oldTools) || $oldTools === []) {
+                                        $oldTools = collect($scanToolOptions ?? [])
+                                            ->filter(fn ($t) => (bool) ($t['enabled'] ?? false))
+                                            ->pluck('key')
+                                            ->all();
+                                    }
+                                @endphp
+                                @foreach (($scanToolOptions ?? []) as $tool)
+                                    @php
+                                        $enabled = (bool) ($tool['enabled'] ?? false);
+                                        $key = (string) ($tool['key'] ?? '');
+                                        $label = (string) ($tool['label'] ?? strtoupper($key));
+                                        $checked = in_array($key, $oldTools, true);
+                                    @endphp
+                                    <label class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs {{ $enabled ? 'border-gray-300 bg-white text-gray-800' : 'border-gray-200 bg-gray-100 text-gray-400' }}">
+                                        <input
+                                            type="checkbox"
+                                            name="tools[]"
+                                            value="{{ $key }}"
+                                            class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                            @checked($checked && $enabled)
+                                            @disabled(! $enabled)
+                                        >
+                                        <span>{{ $label }}</span>
+                                    </label>
+                                @endforeach
+                            </div>
+                            <x-input-error :messages="$errors->get('tools')" class="mt-2" />
+                            <x-input-error :messages="$errors->get('tools.*')" class="mt-2" />
+                        </div>
+                        <button type="submit" class="w-full rounded-xl bg-gradient-to-r from-indigo-500 via-cyan-500 to-violet-500 px-4 py-3 text-sm font-semibold text-white shadow-[0_14px_35px_rgba(79,70,229,0.45)] transition hover:translate-y-[-1px]">
+                            {{ __('Start Secure Scan') }}
+                        </button>
                     </form>
                 </div>
-                <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+                <div class="rounded-2xl border border-white/20 bg-white/10 p-6 shadow-xl backdrop-blur-xl">
                     <div class="flex items-start justify-between gap-3">
                         <h3 class="text-lg font-medium text-gray-900">{{ __('Scan health') }}</h3>
                         <form method="POST" action="{{ route('scans.destroy-all') }}" onsubmit="return confirm('Delete all scans visible to you? This cannot be undone.');">
@@ -481,8 +570,8 @@
                 </div>
             </div>
 
-            <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div class="border-b border-gray-200 px-6 py-4">
+            <div class="wl-card overflow-hidden">
+                <div class="wl-card-header">
                     <h3 class="text-lg font-medium text-gray-900">{{ __('Recent findings feed') }}</h3>
                 </div>
                 <div class="divide-y divide-gray-100">
@@ -522,26 +611,29 @@
             </div>
 
             {{-- Scans table --}}
-            <div class="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
-                <div class="border-b border-gray-200 px-6 py-4">
-                    <h3 class="text-lg font-medium text-gray-900">{{ __('Recent scans') }}</h3>
+            <div class="wl-card overflow-hidden border-white/20">
+                <div class="wl-card-header">
+                    <div class="flex items-center justify-between gap-3">
+                        <h3 class="text-lg font-medium text-gray-900">{{ __('Recent scans') }}</h3>
+                        <span class="text-xs text-slate-400">{{ __('Tap a row to open report') }}</span>
+                    </div>
                 </div>
                 <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200 text-sm">
-                        <thead class="bg-gray-50">
+                    <table class="wl-table">
+                        <thead class="wl-thead">
                             <tr>
-                                <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Target') }}</th>
-                                <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Status') }}</th>
-                                <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Scanner steps') }}</th>
-                                <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Findings') }}</th>
-                                <th class="px-6 py-3 text-left font-medium text-gray-600 w-48">{{ __('Progress') }}</th>
-                                <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Phase') }}</th>
-                                <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Started') }}</th>
-                                <th class="px-6 py-3 text-left font-medium text-gray-600">{{ __('Duration') }}</th>
-                                <th class="px-6 py-3 text-right font-medium text-gray-600">{{ __('') }}</th>
+                                <th class="wl-th">{{ __('Target') }}</th>
+                                <th class="wl-th">{{ __('Status') }}</th>
+                                <th class="wl-th">{{ __('Scanner steps') }}</th>
+                                <th class="wl-th">{{ __('Findings') }}</th>
+                                <th class="wl-th w-48">{{ __('Progress') }}</th>
+                                <th class="wl-th">{{ __('Phase') }}</th>
+                                <th class="wl-th">{{ __('Started') }}</th>
+                                <th class="wl-th">{{ __('Duration') }}</th>
+                                <th class="wl-th text-right">{{ __('') }}</th>
                             </tr>
                         </thead>
-                        <tbody class="divide-y divide-gray-100 bg-white">
+                        <tbody class="divide-y divide-slate-100 bg-white/70">
                             @forelse ($scans as $scan)
                                 @php
                                     $statusStyles = match ($scan->status) {
@@ -578,18 +670,20 @@
                                 @endphp
                                 <tr
                                     data-scan-row
+                                    class="cursor-pointer transition hover:bg-white/10"
+                                    onclick="window.location='{{ route('scans.report', ['scan' => $scan->id, 'view' => auth()->user()?->canViewTechnicalReports() ? 'technical' : 'executive']) }}'"
                                     @if ($poll) data-poll-url="{{ route('scans.progress', $scan) }}" @endif
                                 >
-                                    <td class="px-6 py-3 font-medium text-gray-900 break-all max-w-xs">
+                                    <td class="wl-td font-medium text-slate-900 break-all max-w-xs">
                                         <span class="block">{{ \Illuminate\Support\Str::limit($scan->url, 56) }}</span>
                                         <span class="text-xs text-gray-500">#{{ $scan->id }}</span>
                                     </td>
-                                    <td class="px-6 py-3">
+                                    <td class="wl-td">
                                         <span data-scan-status-badge class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium {{ $statusStyles }}">
                                             {{ $scan->status }}
                                         </span>
                                     </td>
-                                    <td class="px-6 py-3">
+                                    <td class="wl-td">
                                         <div class="flex flex-wrap gap-1.5 text-[11px]">
                                             @php $zapState = $stepState('zap'); @endphp
                                             <span class="inline-flex rounded-full border px-2 py-0.5 {{ $stepClass($zapState) }}">ZAP</span>
@@ -601,7 +695,7 @@
                                             <span class="inline-flex rounded-full border px-2 py-0.5 {{ $stepClass($aiState) }}">AI</span>
                                         </div>
                                     </td>
-                                    <td class="px-6 py-3">
+                                    <td class="wl-td">
                                         <div class="text-xs text-gray-700 space-y-0.5">
                                             <p class="font-medium text-gray-900">{{ (int) $scan->findings_count }} {{ __('total') }}</p>
                                             <p>
@@ -611,7 +705,7 @@
                                             </p>
                                         </div>
                                     </td>
-                                    <td class="px-6 py-3">
+                                    <td class="wl-td">
                                         <div class="h-2 w-full overflow-hidden rounded-full bg-gray-200">
                                             <div
                                                 data-scan-progress-bar
@@ -621,9 +715,9 @@
                                         </div>
                                         <span class="mt-1 inline-block text-xs text-gray-500">{{ (int) $scan->progress }}%</span>
                                     </td>
-                                    <td class="px-6 py-3 text-gray-700" data-scan-phase>{{ $scan->phase }}</td>
-                                    <td class="px-6 py-3 text-gray-600 whitespace-nowrap" title="{{ $scan->created_at->format('Y-m-d H:i:s') }}">{{ $scan->created_at->diffForHumans() }}</td>
-                                    <td class="px-6 py-3 text-gray-600 whitespace-nowrap">
+                                    <td class="wl-td text-slate-700" data-scan-phase>{{ $scan->phase }}</td>
+                                    <td class="wl-td text-slate-500 whitespace-nowrap" title="{{ $scan->created_at->format('Y-m-d H:i:s') }}">{{ $scan->created_at->diffForHumans() }}</td>
+                                    <td class="wl-td text-slate-500 whitespace-nowrap">
                                         @if ($scan->completed_at)
                                             {{ $scan->created_at->diffAsCarbonInterval($scan->completed_at)->cascade()->forHumans(['short' => true]) }}
                                         @else
@@ -631,15 +725,15 @@
                                         @endif
                                         <p data-scan-queue-hint class="mt-1 text-[11px] text-indigo-600"></p>
                                     </td>
-                                    <td class="px-6 py-3 text-right whitespace-nowrap">
-                                        <div class="inline-flex items-center gap-2">
-                                        <a href="{{ route('scans.report', ['scan' => $scan->id, 'view' => auth()->user()?->canViewTechnicalReports() ? 'technical' : 'executive']) }}" class="inline-flex rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-indigo-700 hover:bg-indigo-100 font-medium">
+                                    <td class="wl-td text-right whitespace-nowrap">
+                                        <div class="inline-flex items-center gap-2" onclick="event.stopPropagation()">
+                                        <a href="{{ route('scans.report', ['scan' => $scan->id, 'view' => auth()->user()?->canViewTechnicalReports() ? 'technical' : 'executive']) }}" class="wl-btn-secondary">
                                             {{ __('Report') }}
                                         </a>
                                         <form method="POST" action="{{ route('scans.destroy', $scan) }}" onsubmit="return confirm('Delete this scan? This cannot be undone.');" class="inline">
                                             @csrf
                                             @method('DELETE')
-                                            <button type="submit" class="inline-flex rounded-md border border-red-200 bg-red-50 px-2.5 py-1 text-red-700 hover:bg-red-100 font-medium">
+                                            <button type="submit" class="wl-btn-danger">
                                                 {{ __('Delete') }}
                                             </button>
                                         </form>

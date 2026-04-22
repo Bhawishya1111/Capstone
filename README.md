@@ -56,3 +56,34 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+
+## Docker Quick Start
+
+Run the app, MySQL, queue worker, and scheduler with Docker Compose:
+
+```bash
+docker compose up --build -d
+```
+
+Open the app at [http://localhost:8000](http://localhost:8000).
+
+Useful commands:
+
+```bash
+# View logs
+docker compose logs -f app worker
+
+# Run artisan commands
+docker compose exec app php artisan migrate --force
+docker compose exec app php artisan queue:restart
+
+# Stop everything
+docker compose down
+```
+
+MySQL is exposed on host port `3307`:
+- host: `127.0.0.1`
+- port: `3307`
+- database: `admin_main`
+- username: `root`
+- password: `root`
