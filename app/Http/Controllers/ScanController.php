@@ -479,7 +479,10 @@ class ScanController extends Controller
         $this->ensureCanViewScan($request->user(), $scan);
 
         $queuePosition = null;
-        if (in_array($scan->status, [Scan::STATUS_QUEUED, Scan::STATUS_RUNNING], true)) {
+        if (
+            Schema::hasTable('jobs')
+            && in_array($scan->status, [Scan::STATUS_QUEUED, Scan::STATUS_RUNNING], true)
+        ) {
             $queuedScanIds = DB::table('jobs')
                 ->orderBy('id')
                 ->pluck('payload')
@@ -541,6 +544,10 @@ class ScanController extends Controller
 
     private function cancelQueuedJobsForScan(int $scanId): void
     {
+        if (! Schema::hasTable('jobs')) {
+            return;
+        }
+
         $jobs = DB::table('jobs')->select('id', 'payload')->get();
         $jobIdsToDelete = [];
 
