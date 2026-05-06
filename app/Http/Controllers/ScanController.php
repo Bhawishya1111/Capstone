@@ -7,6 +7,7 @@ use App\Models\Scan;
 use App\Models\ScanFinding;
 use App\Models\User;
 use App\Models\Website;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -30,7 +31,6 @@ class ScanController extends Controller
     {
         $user = $request->user();
         $scansQuery = Scan::query()->visibleToUser($user);
-        $completedQuery = (clone $scansQuery)->whereNotNull('completed_at');
         $completedScansCount = (clone $scansQuery)->where('status', Scan::STATUS_COMPLETED)->count();
         $failedScansCount = (clone $scansQuery)->where('status', Scan::STATUS_FAILED)->count();
         $terminalCount = $completedScansCount + $failedScansCount;
@@ -42,10 +42,7 @@ class ScanController extends Controller
             'completed_scans' => $completedScansCount,
             'failed_scans' => $failedScansCount,
             'success_rate' => $terminalCount > 0 ? round(($completedScansCount / $terminalCount) * 100, 1) : null,
-            'avg_duration_seconds' => (int) ((clone $completedQuery)
-                ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
-                ->selectRaw('AVG(TIMESTAMPDIFF(SECOND, created_at, completed_at)) as avg_seconds')
-                ->value('avg_seconds') ?? 0),
+            'avg_duration_seconds' => $this->averageCompletedScanDurationSeconds($scansQuery),
             'last_scan_at' => (clone $scansQuery)->max('created_at'),
         ];
 
@@ -277,6 +274,28 @@ class ScanController extends Controller
             'scans' => $scans,
             'scanToolOptions' => $scanToolOptions,
         ]);
+    }
+
+    private function averageCompletedScanDurationSeconds(Builder $scansQuery): int
+    {
+        $driver = DB::connection()->getDriverName();
+        $durationExpression = match ($driver) {
+            'mysql', 'mariadb' => 'TIMESTAMPDIFF(SECOND, created_at, completed_at)',
+            'pgsql' => 'EXTRACT(EPOCH FROM (completed_at - created_at))',
+            'sqlite' => "strftime('%s', completed_at) - strftime('%s', created_at)",
+            'sqlsrv' => 'DATEDIFF(second, created_at, completed_at)',
+            default => null,
+        };
+
+        if ($durationExpression === null) {
+            return 0;
+        }
+
+        return (int) ((clone $scansQuery)
+            ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
+            ->whereNotNull('completed_at')
+            ->selectRaw('AVG('.$durationExpression.') as avg_seconds')
+            ->value('avg_seconds') ?? 0);
     }
 
     /**
