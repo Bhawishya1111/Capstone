@@ -5,12 +5,18 @@ namespace Tests\Feature;
 use App\Models\Scan;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Foundation\Testing\WithoutVite;
 use Tests\TestCase;
 
 class DashboardTest extends TestCase
 {
-    use RefreshDatabase, WithoutVite;
+    use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->withoutVite();
+    }
 
     public function test_dashboard_renders_for_authenticated_user(): void
     {
