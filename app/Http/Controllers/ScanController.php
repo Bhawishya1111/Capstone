@@ -217,9 +217,9 @@ class ScanController extends Controller
             ->with('website')
             ->withCount('findings')
             ->withCount([
-                'findings as zap_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_ZAP),
-                'findings as nikto_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_NIKTO),
-                'findings as nuclei_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_NUCLEI),
+                'findings as zap_findings_count' => fn ($q) => $q->where('source', ScanFinding::SOURCE_ZAP),
+                'findings as nikto_findings_count' => fn ($q) => $q->where('source', ScanFinding::SOURCE_NIKTO),
+                'findings as nuclei_findings_count' => fn ($q) => $q->where('source', ScanFinding::SOURCE_NUCLEI),
             ])
             ->orderByDesc('created_at')
             ->limit(50)
