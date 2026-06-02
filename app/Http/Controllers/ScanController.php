@@ -44,7 +44,7 @@ class ScanController extends Controller
             'success_rate' => $terminalCount > 0 ? round(($completedScansCount / $terminalCount) * 100, 1) : null,
             'avg_duration_seconds' => (int) ((clone $completedQuery)
                 ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
-                ->selectRaw('AVG(TIMESTAMPDIFF(SECOND, created_at, completed_at)) as avg_seconds')
+                ->selectRaw($this->avgDurationSecondsExpression().' as avg_seconds')
                 ->value('avg_seconds') ?? 0),
             'last_scan_at' => (clone $scansQuery)->max('created_at'),
         ];
@@ -277,6 +277,18 @@ class ScanController extends Controller
             'scans' => $scans,
             'scanToolOptions' => $scanToolOptions,
         ]);
+    }
+
+    private function avgDurationSecondsExpression(): string
+    {
+        $driver = DB::connection()->getDriverName();
+
+        return match ($driver) {
+            'sqlite' => "AVG(strftime('%s', completed_at) - strftime('%s', created_at))",
+            'pgsql' => 'AVG(EXTRACT(EPOCH FROM (completed_at - created_at)))',
+            'sqlsrv' => 'AVG(DATEDIFF(second, created_at, completed_at))',
+            default => 'AVG(TIMESTAMPDIFF(SECOND, created_at, completed_at))',
+        };
     }
 
     /**
