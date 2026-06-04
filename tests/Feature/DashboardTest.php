@@ -11,6 +11,13 @@ class DashboardTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->withoutVite();
+    }
+
     public function test_dashboard_renders_for_authenticated_user(): void
     {
         $user = User::factory()->create();
