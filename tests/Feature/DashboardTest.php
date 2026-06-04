@@ -28,22 +28,24 @@ class DashboardTest extends TestCase
         $response->assertSee('WAVe-Lite', false);
     }
 
-    public function test_dashboard_includes_progress_script(): void
+    public function test_dashboard_includes_progress_polling_hooks(): void
     {
         $user = User::factory()->create();
+        $this->createScan($user, Scan::STATUS_RUNNING, 10);
 
         $response = $this->actingAs($user)->get(route('dashboard'));
 
         $response->assertOk();
-        $response->assertSee('dashboard-', false);
+        $response->assertSee('data-scan-progress-bar', false);
+        $response->assertSee('data-poll-url', false);
     }
 
     public function test_dashboard_renders_average_duration_for_terminal_scans(): void
     {
         $user = User::factory()->create();
 
-        $this->createTerminalScan($user, Scan::STATUS_COMPLETED, 60);
-        $this->createTerminalScan($user, Scan::STATUS_FAILED, 120);
+        $this->createScan($user, Scan::STATUS_COMPLETED, 60);
+        $this->createScan($user, Scan::STATUS_FAILED, 120);
 
         $response = $this->actingAs($user)->get(route('dashboard'));
 
@@ -51,7 +53,7 @@ class DashboardTest extends TestCase
         $response->assertSee('00:01:30');
     }
 
-    private function createTerminalScan(User $user, string $status, int $durationSeconds): void
+    private function createScan(User $user, string $status, int $durationSeconds): void
     {
         $startedAt = now()->subMinutes(10);
 
@@ -59,12 +61,18 @@ class DashboardTest extends TestCase
             'user_id' => $user->id,
             'url' => 'https://example.com',
             'status' => $status,
-            'progress' => 100,
-            'phase' => $status === Scan::STATUS_COMPLETED ? Scan::PHASE_COMPLETED : Scan::PHASE_FAILED,
+            'progress' => $status === Scan::STATUS_RUNNING ? 25 : 100,
+            'phase' => match ($status) {
+                Scan::STATUS_COMPLETED => Scan::PHASE_COMPLETED,
+                Scan::STATUS_RUNNING => Scan::PHASE_ZAP_SPIDER,
+                default => Scan::PHASE_FAILED,
+            },
         ]);
         $scan->created_at = $startedAt;
         $scan->updated_at = $startedAt->copy()->addSeconds($durationSeconds);
-        $scan->completed_at = $startedAt->copy()->addSeconds($durationSeconds);
+        if ($status !== Scan::STATUS_RUNNING) {
+            $scan->completed_at = $startedAt->copy()->addSeconds($durationSeconds);
+        }
         $scan->save();
     }
 }
