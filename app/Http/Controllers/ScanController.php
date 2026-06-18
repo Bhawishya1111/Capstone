@@ -44,7 +44,7 @@ class ScanController extends Controller
             'success_rate' => $terminalCount > 0 ? round(($completedScansCount / $terminalCount) * 100, 1) : null,
             'avg_duration_seconds' => (int) ((clone $completedQuery)
                 ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
-                ->selectRaw('AVG(TIMESTAMPDIFF(SECOND, created_at, completed_at)) as avg_seconds')
+                ->selectRaw($this->avgDurationSecondsExpression().' as avg_seconds')
                 ->value('avg_seconds') ?? 0),
             'last_scan_at' => (clone $scansQuery)->max('created_at'),
         ];
@@ -217,9 +217,9 @@ class ScanController extends Controller
             ->with('website')
             ->withCount('findings')
             ->withCount([
-                'findings as zap_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_ZAP),
-                'findings as nikto_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_NIKTO),
-                'findings as nuclei_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_NUCLEI),
+                'findings as zap_findings_count' => fn ($q) => $q->where('source', ScanFinding::SOURCE_ZAP),
+                'findings as nikto_findings_count' => fn ($q) => $q->where('source', ScanFinding::SOURCE_NIKTO),
+                'findings as nuclei_findings_count' => fn ($q) => $q->where('source', ScanFinding::SOURCE_NUCLEI),
             ])
             ->orderByDesc('created_at')
             ->limit(50)
@@ -277,6 +277,16 @@ class ScanController extends Controller
             'scans' => $scans,
             'scanToolOptions' => $scanToolOptions,
         ]);
+    }
+
+    private function avgDurationSecondsExpression(): string
+    {
+        return match (DB::connection()->getDriverName()) {
+            'sqlite' => "AVG(strftime('%s', completed_at) - strftime('%s', created_at))",
+            'pgsql' => 'AVG(EXTRACT(EPOCH FROM (completed_at - created_at)))',
+            'sqlsrv' => 'AVG(DATEDIFF(second, created_at, completed_at))',
+            default => 'AVG(TIMESTAMPDIFF(SECOND, created_at, completed_at))',
+        };
     }
 
     /**
