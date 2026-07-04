@@ -32,11 +32,19 @@ class DashboardTest extends TestCase
     public function test_dashboard_includes_progress_script(): void
     {
         $user = User::factory()->create();
+        Scan::query()->create([
+            'user_id' => $user->id,
+            'url' => 'https://example.com',
+            'status' => Scan::STATUS_RUNNING,
+            'progress' => 42,
+            'phase' => Scan::PHASE_ZAP_SPIDER,
+        ]);
 
         $response = $this->actingAs($user)->get(route('dashboard'));
 
         $response->assertOk();
-        $response->assertSee('dashboard-', false);
+        $response->assertSee('data-poll-url', false);
+        $response->assertSee('data-scan-progress-bar', false);
     }
 
     public function test_dashboard_averages_terminal_scan_duration_on_sqlite(): void

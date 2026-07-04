@@ -34,6 +34,10 @@ class ScanController extends Controller
         $completedScansCount = (clone $scansQuery)->where('status', Scan::STATUS_COMPLETED)->count();
         $failedScansCount = (clone $scansQuery)->where('status', Scan::STATUS_FAILED)->count();
         $terminalCount = $completedScansCount + $failedScansCount;
+        $avgDurationSeconds = (clone $completedQuery)
+            ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
+            ->selectRaw('AVG('.$this->scanDurationSecondsExpression().') as avg_seconds')
+            ->value('avg_seconds');
 
         $stats = [
             'total_scans' => (clone $scansQuery)->count(),
@@ -42,10 +46,7 @@ class ScanController extends Controller
             'completed_scans' => $completedScansCount,
             'failed_scans' => $failedScansCount,
             'success_rate' => $terminalCount > 0 ? round(($completedScansCount / $terminalCount) * 100, 1) : null,
-            'avg_duration_seconds' => (int) ((clone $completedQuery)
-                ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
-                ->selectRaw('AVG('.$this->scanDurationSecondsExpression().') as avg_seconds')
-                ->value('avg_seconds') ?? 0),
+            'avg_duration_seconds' => (int) round((float) ($avgDurationSeconds ?? 0)),
             'last_scan_at' => (clone $scansQuery)->max('created_at'),
         ];
 
