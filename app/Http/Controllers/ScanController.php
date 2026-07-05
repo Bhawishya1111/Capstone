@@ -42,10 +42,10 @@ class ScanController extends Controller
             'completed_scans' => $completedScansCount,
             'failed_scans' => $failedScansCount,
             'success_rate' => $terminalCount > 0 ? round(($completedScansCount / $terminalCount) * 100, 1) : null,
-            'avg_duration_seconds' => (int) ((clone $completedQuery)
+            'avg_duration_seconds' => (int) round((float) ((clone $completedQuery)
                 ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
-                ->selectRaw('AVG(TIMESTAMPDIFF(SECOND, created_at, completed_at)) as avg_seconds')
-                ->value('avg_seconds') ?? 0),
+                ->selectRaw($this->averageDurationSecondsExpression().' as avg_seconds')
+                ->value('avg_seconds') ?? 0)),
             'last_scan_at' => (clone $scansQuery)->max('created_at'),
         ];
 
@@ -277,6 +277,16 @@ class ScanController extends Controller
             'scans' => $scans,
             'scanToolOptions' => $scanToolOptions,
         ]);
+    }
+
+    private function averageDurationSecondsExpression(): string
+    {
+        return match (DB::connection()->getDriverName()) {
+            'sqlite' => 'AVG((julianday(completed_at) - julianday(created_at)) * 86400.0)',
+            'pgsql' => 'AVG(EXTRACT(EPOCH FROM (completed_at - created_at)))',
+            'sqlsrv' => 'AVG(DATEDIFF(second, created_at, completed_at))',
+            default => 'AVG(TIMESTAMPDIFF(SECOND, created_at, completed_at))',
+        };
     }
 
     /**
