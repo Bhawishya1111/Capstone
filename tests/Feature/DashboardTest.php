@@ -28,14 +28,18 @@ class DashboardTest extends TestCase
         $response->assertSee('WAVe-Lite', false);
     }
 
-    public function test_dashboard_includes_progress_script(): void
+    public function test_dashboard_includes_progress_polling_hooks(): void
     {
         $user = User::factory()->create();
+
+        $this->createScan($user, Scan::STATUS_RUNNING, null);
 
         $response = $this->actingAs($user)->get(route('dashboard'));
 
         $response->assertOk();
-        $response->assertSee('dashboard-', false);
+        $response->assertSee('data-poll-url', false);
+        $response->assertSee('data-scan-progress-bar', false);
+        $response->assertSee('data-scan-status-badge', false);
     }
 
     public function test_dashboard_calculates_average_terminal_scan_duration(): void
