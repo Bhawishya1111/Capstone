@@ -34,6 +34,10 @@ class ScanController extends Controller
         $completedScansCount = (clone $scansQuery)->where('status', Scan::STATUS_COMPLETED)->count();
         $failedScansCount = (clone $scansQuery)->where('status', Scan::STATUS_FAILED)->count();
         $terminalCount = $completedScansCount + $failedScansCount;
+        $avgDurationSeconds = (int) round((float) ((clone $completedQuery)
+            ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
+            ->selectRaw('AVG('.$this->scanDurationSecondsExpression().') as avg_seconds')
+            ->value('avg_seconds') ?? 0));
 
         $stats = [
             'total_scans' => (clone $scansQuery)->count(),
@@ -42,10 +46,7 @@ class ScanController extends Controller
             'completed_scans' => $completedScansCount,
             'failed_scans' => $failedScansCount,
             'success_rate' => $terminalCount > 0 ? round(($completedScansCount / $terminalCount) * 100, 1) : null,
-            'avg_duration_seconds' => (int) ((clone $completedQuery)
-                ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
-                ->selectRaw('AVG(TIMESTAMPDIFF(SECOND, created_at, completed_at)) as avg_seconds')
-                ->value('avg_seconds') ?? 0),
+            'avg_duration_seconds' => $avgDurationSeconds,
             'last_scan_at' => (clone $scansQuery)->max('created_at'),
         ];
 
@@ -324,6 +325,16 @@ class ScanController extends Controller
             })
             ->values()
             ->all();
+    }
+
+    private function scanDurationSecondsExpression(): string
+    {
+        return match (DB::connection()->getDriverName()) {
+            'sqlite' => "strftime('%s', completed_at) - strftime('%s', created_at)",
+            'pgsql' => 'EXTRACT(EPOCH FROM (completed_at - created_at))',
+            'sqlsrv' => 'DATEDIFF(second, created_at, completed_at)',
+            default => 'TIMESTAMPDIFF(SECOND, created_at, completed_at)',
+        };
     }
 
     public function storeWebsite(Request $request): RedirectResponse
