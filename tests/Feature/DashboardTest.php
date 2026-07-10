@@ -32,10 +32,23 @@ class DashboardTest extends TestCase
     {
         $user = User::factory()->create();
 
+        Scan::forceCreate([
+            'user_id' => $user->id,
+            'url' => 'https://example.com/running',
+            'status' => Scan::STATUS_RUNNING,
+            'progress' => 50,
+            'phase' => Scan::PHASE_ZAP_ACTIVE,
+            'created_at' => now()->subMinute(),
+            'updated_at' => now(),
+            'completed_at' => null,
+        ]);
+
         $response = $this->actingAs($user)->get(route('dashboard'));
 
         $response->assertOk();
-        $response->assertSee('dashboard-', false);
+        $response->assertSee('data-poll-url=', false);
+        $response->assertSee('data-scan-progress-bar', false);
+        $response->assertSee('data-scan-status-badge', false);
     }
 
     public function test_dashboard_reports_average_terminal_scan_duration(): void
