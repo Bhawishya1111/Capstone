@@ -34,6 +34,10 @@ class ScanController extends Controller
         $completedScansCount = (clone $scansQuery)->where('status', Scan::STATUS_COMPLETED)->count();
         $failedScansCount = (clone $scansQuery)->where('status', Scan::STATUS_FAILED)->count();
         $terminalCount = $completedScansCount + $failedScansCount;
+        $avgDurationSeconds = (clone $completedQuery)
+            ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
+            ->selectRaw($this->averageDurationSecondsExpression().' as avg_seconds')
+            ->value('avg_seconds');
 
         $stats = [
             'total_scans' => (clone $scansQuery)->count(),
@@ -42,10 +46,7 @@ class ScanController extends Controller
             'completed_scans' => $completedScansCount,
             'failed_scans' => $failedScansCount,
             'success_rate' => $terminalCount > 0 ? round(($completedScansCount / $terminalCount) * 100, 1) : null,
-            'avg_duration_seconds' => (int) ((clone $completedQuery)
-                ->whereIn('status', [Scan::STATUS_COMPLETED, Scan::STATUS_FAILED])
-                ->selectRaw('AVG(TIMESTAMPDIFF(SECOND, created_at, completed_at)) as avg_seconds')
-                ->value('avg_seconds') ?? 0),
+            'avg_duration_seconds' => (int) round((float) ($avgDurationSeconds ?? 0)),
             'last_scan_at' => (clone $scansQuery)->max('created_at'),
         ];
 
@@ -217,9 +218,9 @@ class ScanController extends Controller
             ->with('website')
             ->withCount('findings')
             ->withCount([
-                'findings as zap_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_ZAP),
-                'findings as nikto_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_NIKTO),
-                'findings as nuclei_findings_count' => fn ($q) => $q->where('source', \App\Models\ScanFinding::SOURCE_NUCLEI),
+                'findings as zap_findings_count' => fn ($q) => $q->where('source', ScanFinding::SOURCE_ZAP),
+                'findings as nikto_findings_count' => fn ($q) => $q->where('source', ScanFinding::SOURCE_NIKTO),
+                'findings as nuclei_findings_count' => fn ($q) => $q->where('source', ScanFinding::SOURCE_NUCLEI),
             ])
             ->orderByDesc('created_at')
             ->limit(50)
@@ -733,6 +734,16 @@ class ScanController extends Controller
         if (! $ok) {
             abort(403);
         }
+    }
+
+    private function averageDurationSecondsExpression(): string
+    {
+        return match (DB::connection()->getDriverName()) {
+            'sqlite' => "AVG(strftime('%s', completed_at) - strftime('%s', created_at))",
+            'pgsql' => 'AVG(EXTRACT(EPOCH FROM (completed_at - created_at)))',
+            'sqlsrv' => 'AVG(DATEDIFF(second, created_at, completed_at))',
+            default => 'AVG(TIMESTAMPDIFF(SECOND, created_at, completed_at))',
+        };
     }
 
     private function rawFileExists(?string $relative): bool
